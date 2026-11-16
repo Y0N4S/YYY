@@ -1,0 +1,65 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Atlas Maps</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{--ui:#fff;--tx:#202124;--mut:#5f6368;--chip:#e8f0fe;--blue:#1a73e8}
+@media(prefers-color-scheme:dark){:root{--ui:#2b2f36;--tx:#e8eaed;--mut:#9aa0a6;--chip:#36435a;--blue:#8ab4f8}.dark .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.9)}}
+html,body{height:100%;margin:0;font:15px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--tx)}
+#map{position:absolute;inset:0}
+.ui{position:absolute;z-index:1000;background:var(--ui);box-shadow:0 2px 8px rgba(0,0,0,.3)}
+#top{left:10px;right:10px;top:calc(10px + env(safe-area-inset-top,0px));max-width:420px;border-radius:26px;padding:0 6px 0 16px;height:48px;display:flex;align-items:center;gap:8px}
+#q{flex:1;border:0;background:none;color:var(--tx);font-size:16px;outline:0;min-width:0}
+button{border:0;cursor:pointer;font:inherit;color:var(--tx);background:none}
+#go{font-size:18px;padding:8px}
+#res{left:10px;right:10px;top:calc(66px + env(safe-area-inset-top,0px));max-width:420px;border-radius:16px;display:none;overflow:hidden}
+#res div{padding:11px 16px;cursor:pointer;border-bottom:1px solid rgba(128,128,128,.2)}#res div:hover{background:var(--chip)}
+small{display:block;color:var(--mut)}
+#side{right:10px;top:calc(76px + env(safe-area-inset-top,0px));background:none;box-shadow:none;display:flex;flex-direction:column;gap:8px}
+#side button{width:42px;height:42px;border-radius:50%;background:var(--ui);box-shadow:0 1px 5px rgba(0,0,0,.3);font-size:18px}
+#card{left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom,0px));max-width:420px;border-radius:18px;padding:14px 16px;display:none;max-height:55%;overflow:auto}
+.p{background:var(--blue);color:#fff;border-radius:20px;padding:9px 18px;margin-top:10px}
+.chips{display:flex;gap:8px;margin-top:10px}.chips button{flex:1;padding:8px 4px;border-radius:12px;background:var(--chip)}.chips .on{background:var(--blue);color:#fff}
+ol{padding-left:20px;margin:10px 0 0}li{margin:4px 0}.x{float:right;color:var(--mut);font-size:18px}
+</style></head><body>
+<div id="map"></div>
+<div id="top" class="ui"><span>🔍</span><input id="q" placeholder="Search places or addresses" autocomplete="off"><button id="go">➜</button></div>
+<div id="res" class="ui"></div>
+<div id="side" class="ui"><button id="loc" title="My location">◎</button><button id="lay" title="Satellite">🛰️</button></div>
+<div id="card" class="ui"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const $=s=>document.querySelector(s),map=L.map("map",{zoomControl:false}).setView([43.7647,-79.1865],14);
+L.control.zoom({position:"bottomright"}).addTo(map);
+const street=L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap contributors"}),
+sat=L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:19,attribution:"Tiles © Esri"});
+street.addTo(map);let isSat=0;document.body.classList.add("dark");
+$("#lay").onclick=()=>{isSat=!isSat;isSat?(map.removeLayer(street),sat.addTo(map)):(map.removeLayer(sat),street.addTo(map));document.body.classList.toggle("dark",!isSat)};
+let me=null,meMark=null,dest=null,destMark=null,routeLine=null,routes={},mode="car";
+const dot=L.divIcon({className:"",html:'<div style="width:16px;height:16px;border-radius:50%;background:#1a73e8;border:3px solid #fff;box-shadow:0 0 6px rgba(0,0,0,.5)"></div>',iconSize:[16,16]});
+function locate(fly){navigator.geolocation&&navigator.geolocation.getCurrentPosition(p=>{me=[p.coords.latitude,p.coords.longitude];meMark?meMark.setLatLng(me):meMark=L.marker(me,{icon:dot}).addTo(map);if(fly)map.flyTo(me,15)},()=>{},{enableHighAccuracy:true})}
+$("#loc").onclick=()=>me?map.flyTo(me,15):locate(1);locate(1);
+// search (OpenStreetMap Nominatim)
+async function search(){const q=$("#q").value.trim();if(!q)return;const b=map.getBounds(),vb=[b.getWest(),b.getNorth(),b.getEast(),b.getSouth()].join(",");
+ const r=await(await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&q="+encodeURIComponent(q)+"&viewbox="+vb)).json();
+ $("#res").innerHTML=r.length?r.map((p,i)=>`<div data-i="${i}">${p.name||p.display_name.split(",")[0]}<small>${p.display_name}</small></div>`).join(""):"<div>No results</div>";
+ $("#res").style.display="block";$("#res").onclick=e=>{const d=e.target.closest("[data-i]");if(d)choose(r[d.dataset.i])}}
+$("#go").onclick=search;$("#q").addEventListener("keydown",e=>e.key=="Enter"&&search());
+function choose(p){$("#res").style.display="none";dest=[+p.lat,+p.lon];destMark&&destMark.remove();clearRoute();destMark=L.marker(dest).addTo(map);map.flyTo(dest,16);
+ $("#card").style.display="block";$("#card").innerHTML=`<button class="x" onclick="closeCard()">✕</button><b>${p.name||p.display_name.split(",")[0]}</b><small>${p.display_name}</small><button class="p" onclick="route()">➜ Directions</button>`}
+map.on("click",async e=>{$("#res").style.display="none";const r=await(await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${e.latlng.lat}&lon=${e.latlng.lng}`)).json();if(r.lat)choose(r)});
+function closeCard(){$("#card").style.display="none";destMark&&destMark.remove();clearRoute();dest=null}
+function clearRoute(){routeLine&&routeLine.remove();routeLine=null;routes={}}
+// routing (routing.openstreetmap.de, OSRM-based)
+const prof={car:"routed-car",foot:"routed-foot",bike:"routed-bike"};
+async function route(){if(!me){alert("Allow location access first to get directions.");locate(1);return}
+ for(const m in prof){const u=`https://routing.openstreetmap.de/${prof[m]}/route/v1/driving/${me[1]},${me[0]};${dest[1]},${dest[0]}?overview=full&geometries=geojson&steps=true`;
+  try{const r=await(await fetch(u)).json();if(r.routes&&r.routes[0])routes[m]=r.routes[0]}catch(e){}}
+ show()}
+const fmtD=m=>m<1000?Math.round(m/10)*10+" m":(m/1000).toFixed(1)+" km",fmtT=s=>{const m=Math.max(1,Math.round(s/60));return m>=60?Math.floor(m/60)+" h "+m%60+" min":m+" min"};
+function show(){const r=routes[mode];if(!r){$("#card").innerHTML=`<button class="x" onclick="closeCard()">✕</button>No route found.`;return}
+ routeLine&&routeLine.remove();routeLine=L.geoJSON(r.geometry,{style:{color:"#1a73e8",weight:6}}).addTo(map);map.fitBounds(routeLine.getBounds(),{padding:[60,60]});
+ const ic={car:"🚗",foot:"🚶",bike:"🚲"},steps=r.legs[0].steps.filter(s=>s.maneuver).map(s=>`<li>${txt(s)} <small>${fmtD(s.distance)}</small></li>`).join("");
+ $("#card").innerHTML=`<button class="x" onclick="closeCard()">✕</button><div class="chips">${Object.keys(prof).map(m=>`<button class="${m==mode?"on":""}" onclick="mode='${m}';show()">${ic[m]} ${routes[m]?fmtT(routes[m].duration):"–"}</button>`).join("")}</div><p><b>${fmtT(r.duration)}</b> · ${fmtD(r.distance)}</p><ol>${steps}</ol>`}
+function txt(s){const m=s.maneuver,t=m.type,d=m.modifier||"",n=s.name?" onto "+s.name:"";
+ if(t=="depart")return"Head "+(d||"out")+(s.name?" on "+s.name:"");if(t=="arrive")return"Arrive at destination";if(t=="roundabout"||t=="rotary")return"Take the roundabout"+n;
+ if(t=="continue"||d=="straight")return"Continue straight"+(s.name?" on "+s.name:"");return"Turn "+d+n}
+</script></body></html>
