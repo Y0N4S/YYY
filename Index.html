@@ -19,40 +19,63 @@ html,body{margin:0;height:100%;overflow:hidden;background:#9cc8ee;font:13px syst
 <script>
 const $=s=>document.querySelector(s),rnd=n=>Math.abs(Math.sin(n*12.9898)*43758.5453)%1;
 const R=new THREE.WebGLRenderer({canvas:$("#g"),antialias:true});R.setPixelRatio(Math.min(devicePixelRatio,2));
-const sc=new THREE.Scene();sc.background=new THREE.Color(0x9cc8ee);sc.fog=new THREE.Fog(0x9cc8ee,120,450);
+const sc=new THREE.Scene();sc.background=new THREE.Color(0x9cc8ee);sc.fog=new THREE.Fog(0x9cc8ee,90,300);
 const cam=new THREE.PerspectiveCamera(60,1,.5,800);
 sc.add(new THREE.HemisphereLight(0xffffff,0x667755,.95));const sun=new THREE.DirectionalLight(0xffffff,.7);sun.position.set(100,200,60);sc.add(sun);
 function rs(){R.setSize(innerWidth,innerHeight,false);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()}addEventListener("resize",rs);rs();
 let lat0=43.7647,lon0=-79.1865,W=new THREE.Group(),solid=[];sc.add(W);
 const KX=()=>111320*Math.cos(lat0*Math.PI/180),proj=(la,lo)=>[(lo-lon0)*KX(),-(la-lat0)*110540],unproj=(x,z)=>[lat0-z/110540,lon0+x/KX()];
-// ---- data
-async function fetchOSM(){const a=`(around:300,${lat0},${lon0})`,q=`[out:json][timeout:20];(way["building"]${a};way["highway"]${a};way["natural"="water"](around:400,${lat0},${lon0});way["leisure"~"park|garden|pitch"]${a};);out geom 1500;`;
- const j=await(await fetch("https://overpass-api.de/api/interpreter",{method:"POST",body:"data="+encodeURIComponent(q)})).json(),D={roads:[],bld:[],water:[],park:[]};
- for(const e of j.elements){if(!e.geometry)continue;const pts=e.geometry.map(p=>proj(p.lat,p.lon)),t=e.tags||{};
-  if(t.building)D.bld.push({pts,h:parseFloat(t.height)||(+t["building:levels"]||0)*3.2||6+rnd(e.id)*12,c:e.id});
-  else if(t.highway)D.roads.push({pts,w:/motorway|trunk|primary/.test(t.highway)?11:/secondary|tertiary/.test(t.highway)?8:/foot|path|cycle|steps|pedestrian/.test(t.highway)?2:6});
-  else if(t.natural=="water")D.water.push(pts);else D.park.push(pts)}return D}
-function synth(){const D={roads:[],bld:[],water:[],park:[]};for(let i=-4;i<=4;i++){D.roads.push({pts:[[i*70,-300],[i*70,300]],w:i%2?6:9});D.roads.push({pts:[[-300,i*70],[300,i*70]],w:i%2?6:9})}
- for(let i=-4;i<4;i++)for(let j=-4;j<4;j++){const x=i*70+12,z=j*70+12;if(i==1&&j==1){D.park.push([[x,z],[x+46,z],[x+46,z+46],[x,z+46]]);continue}
-  for(let a=0;a<2;a++)for(let b=0;b<2;b++){const r=rnd(i*97+j*13+a*5+b);if(r>.15){const X=x+a*24,Z=z+b*24;D.bld.push({pts:[[X,Z],[X+20,Z],[X+20,Z+20],[X,Z+20]],h:6+r*40,c:r*1e4})}}}return D}
-// ---- build
-const pal=[0xd9d2c5,0xc9b8a6,0xb8c4cc,0xe2cdb4,0xa9a9b5,0xcfa89a].map(c=>new THREE.MeshLambertMaterial({color:c}));
+// ---- chunks: streamed in and out around the player
+const C=210,LR=1,UR=2,chunks=new Map(),cache=new Map(),fly=new Set(),retry={};let offline=0,okOnce=0,gen=0,needSpawn=1,ms=0;
+const ck=(i,j)=>i+","+j,cof=(x,z)=>[Math.floor((x+C/2)/C),Math.floor((z+C/2)/C)],org=(i,j)=>[i*C-C/2,j*C-C/2];
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(1400,1400),new THREE.MeshLambertMaterial({color:0xc8c5b8}));ground.rotation.x=-Math.PI/2;sc.add(ground);
+const pal=[0xd9d2c5,0xc9b8a6,0xb8c4cc,0xe2cdb4,0xa9a9b5,0xcfa89a].map(c=>new THREE.MeshLambertMaterial({color:c})),
+ parkM=new THREE.MeshLambertMaterial({color:0x8fbf73,side:THREE.DoubleSide}),waterM=new THREE.MeshLambertMaterial({color:0x6fa8dc,side:THREE.DoubleSide});
 const pip=(x,z,p)=>{let o=false;for(let i=0,j=p.length-1;i<p.length;j=i++)if((p[i][1]>z)!=(p[j][1]>z)&&x<(p[j][0]-p[i][0])*(z-p[i][1])/(p[j][1]-p[i][1])+p[i][0])o=!o;return o};
 const box4=p=>{const X=p.map(a=>a[0]),Z=p.map(a=>a[1]);return{pts:p,x0:Math.min(...X),x1:Math.max(...X),z0:Math.min(...Z),z1:Math.max(...Z)}};
 const shape=p=>new THREE.Shape(p.map(a=>new THREE.Vector2(a[0],-a[1])));
-function flat(polys,col,y){for(const p of polys){if(p.length<3)continue;const g=new THREE.ShapeGeometry(shape(p));g.rotateX(-Math.PI/2);g.translate(0,y,0);W.add(new THREE.Mesh(g,new THREE.MeshLambertMaterial({color:col,side:THREE.DoubleSide})))}}
-function build(D){W.traverse(o=>o.geometry&&o.geometry.dispose());sc.remove(W);W=new THREE.Group();sc.add(W);solid=[];
- const gr=new THREE.Mesh(new THREE.PlaneGeometry(1400,1400),new THREE.MeshLambertMaterial({color:0xc8c5b8}));gr.rotation.x=-Math.PI/2;W.add(gr);
- flat(D.park,0x8fbf73,.08);flat(D.water,0x6fa8dc,.12);D.water.forEach(p=>solid.push(box4(p)));
+function flat(G,polys,m,y){for(const p of polys){if(p.length<3)continue;const g=new THREE.ShapeGeometry(shape(p));g.rotateX(-Math.PI/2);g.translate(0,y,0);G.add(new THREE.Mesh(g,m))}}
+async function fetchChunk(i,j){const[x0,z0]=org(i,j),[n,w]=unproj(x0,z0),[s,e]=unproj(x0+C,z0+C),b=`(${s},${w},${n},${e})`,
+ q=`[out:json][timeout:25];(way["building"]${b};way["highway"]${b};way["natural"="water"]${b};way["leisure"~"park|garden|pitch"]${b};);out geom 1500;`,
+ r=await fetch("https://overpass-api.de/api/interpreter",{method:"POST",body:"data="+encodeURIComponent(q)});if(!r.ok)throw 0;
+ const J=await r.json(),D={roads:[],bld:[],water:[],park:[]};
+ for(const e2 of J.elements){if(!e2.geometry)continue;const pts=e2.geometry.map(p=>proj(p.lat,p.lon)),t=e2.tags||{};
+  if(t.building)D.bld.push({pts,h:parseFloat(t.height)||(+t["building:levels"]||0)*3.2||6+rnd(e2.id)*12,c:e2.id});
+  else if(t.highway)D.roads.push({pts,w:/motorway|trunk|primary/.test(t.highway)?11:/secondary|tertiary/.test(t.highway)?8:/foot|path|cycle|steps|pedestrian/.test(t.highway)?2:6});
+  else if(t.natural=="water")D.water.push(pts);else D.park.push(pts)}return D}
+function synth(x0,z0,x1,z1){const D={roads:[],bld:[],water:[],park:[]};
+ for(let i=Math.ceil(x0/70);i*70<x1;i++)D.roads.push({pts:[[i*70,z0],[i*70,z1]],w:i%2?6:9});
+ for(let j=Math.ceil(z0/70);j*70<z1;j++)D.roads.push({pts:[[x0,j*70],[x1,j*70]],w:j%2?6:9});
+ for(let i=Math.floor(x0/70);i*70<x1;i++)for(let j=Math.floor(z0/70);j*70<z1;j++){const x=i*70+12,z=j*70+12;if(x<x0||x>=x1||z<z0||z>=z1)continue;
+  if((i+j)%7==0){D.park.push([[x,z],[x+46,z],[x+46,z+46],[x,z+46]]);continue}
+  for(let a=0;a<2;a++)for(let b=0;b<2;b++){const r=rnd(i*97+j*13+a*5+b);if(r>.15){const X=x+a*24,Z=z+b*24;D.bld.push({pts:[[X,Z],[X+20,Z],[X+20,Z+20],[X,Z+20]],h:6+r*40,c:r*1e4})}}}return D}
+// turn one chunk's data into meshes; returns its collision list
+function build(D,G,x0,z0){const solid=[];flat(G,D.park,parkM,.08);flat(G,D.water,waterM,.12);D.water.forEach(p=>solid.push(box4(p)));
  const pos=[],col=[];for(const r of D.roads){const c=new THREE.Color(r.w==2?0xa89f91:0x3d4148);
   for(let i=1;i<r.pts.length;i++){const[a,b]=[r.pts[i-1],r.pts[i]],dx=b[0]-a[0],dz=b[1]-a[1],l=Math.hypot(dx,dz);if(!l)continue;const nx=-dz/l*r.w/2,nz=dx/l*r.w/2,
    v=[[a[0]+nx,a[1]+nz],[a[0]-nx,a[1]-nz],[b[0]+nx,b[1]+nz],[b[0]-nx,b[1]-nz]];for(const k of[0,1,2,1,3,2]){pos.push(v[k][0],.16,v[k][1]);col.push(c.r,c.g,c.b)}}}
- const rg=new THREE.BufferGeometry();rg.setAttribute("position",new THREE.Float32BufferAttribute(pos,3));rg.setAttribute("color",new THREE.Float32BufferAttribute(col,3));W.add(new THREE.Mesh(rg,new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide})));
- for(const b of D.bld){if(b.pts.length<3)continue;const g=new THREE.ExtrudeGeometry(shape(b.pts),{depth:b.h,bevelEnabled:false});g.rotateX(-Math.PI/2);W.add(new THREE.Mesh(g,pal[Math.floor(rnd(b.c)*6)]));solid.push(box4(b.pts))}
- const T=[];for(const p of D.park){const bb=box4(p);for(let k=0;k<30;k++){const x=bb.x0+Math.random()*(bb.x1-bb.x0),z=bb.z0+Math.random()*(bb.z1-bb.z0);if(pip(x,z,p))T.push([x,z])}}
+ const rg=new THREE.BufferGeometry();rg.setAttribute("position",new THREE.Float32BufferAttribute(pos,3));rg.setAttribute("color",new THREE.Float32BufferAttribute(col,3));G.add(new THREE.Mesh(rg,new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide})));
+ for(const b of D.bld){if(b.pts.length<3)continue;const g=new THREE.ExtrudeGeometry(shape(b.pts),{depth:b.h,bevelEnabled:false});g.rotateX(-Math.PI/2);G.add(new THREE.Mesh(g,pal[Math.floor(rnd(b.c)*6)]));solid.push(box4(b.pts))}
+ const T=[];for(const p of D.park){const bb=box4(p),n=Math.min(300,(bb.x1-bb.x0)*(bb.z1-bb.z0)/150|0);for(let k=0;k<n;k++){const x=bb.x0+rnd(p[0][0]*7+k)*(bb.x1-bb.x0),z=bb.z0+rnd(p[0][1]*13+k+.5)*(bb.z1-bb.z0);if(x>=x0&&x<x0+C&&z>=z0&&z<z0+C&&pip(x,z,p))T.push([x,z])}}
  if(T.length){const f=new THREE.InstancedMesh(new THREE.ConeGeometry(2,5,6),new THREE.MeshLambertMaterial({color:0x3f8f4a}),T.length),t=new THREE.InstancedMesh(new THREE.CylinderGeometry(.3,.4,1.6),new THREE.MeshLambertMaterial({color:0x6b4a2f}),T.length),d=new THREE.Object3D();
-  T.forEach((p,i)=>{const s=.7+Math.random()*.8;d.scale.set(s,s,s);d.position.set(p[0],3.2*s,p[1]);d.updateMatrix();f.setMatrixAt(i,d.matrix);d.position.set(p[0],.8*s,p[1]);d.updateMatrix();t.setMatrixAt(i,d.matrix)});W.add(f,t)}}
-const blocked=(x,z)=>solid.some(b=>x>b.x0&&x<b.x1&&z>b.z0&&z<b.z1&&pip(x,z,b.pts));
+  T.forEach((p,i)=>{const s=.7+rnd(i+p[0])*.8;d.scale.set(s,s,s);d.position.set(p[0],3.2*s,p[1]);d.updateMatrix();f.setMatrixAt(i,d.matrix);d.position.set(p[0],.8*s,p[1]);d.updateMatrix();t.setMatrixAt(i,d.matrix)});G.add(f,t)}
+ return solid}
+function mkChunk(i,j,D){const g=new THREE.Group(),[x0,z0]=org(i,j),[n,w]=unproj(x0,z0),[s,e]=unproj(x0+C,z0+C);sc.add(g);
+ chunks.set(ck(i,j),{g,solid:build(D,g,x0,z0),r:L.rectangle([[s,w],[n,e]],{color:"#1a73e8",weight:1,fillOpacity:.05,interactive:false}).addTo(rects)})}
+function drop(k){const c=chunks.get(k);c.g.traverse(o=>{o.geometry&&o.geometry.dispose();o.dispose&&o.dispose()});sc.remove(c.g);rects.removeLayer(c.r);chunks.delete(k)}
+const blocked=(x,z)=>{const c=chunks.get(ck(...cof(x,z)));return!c||c.solid.some(b=>x>b.x0&&x<b.x1&&z>b.z0&&z<b.z1&&pip(x,z,b.pts))};
+// decide each frame which chunks to build, fetch, keep or free
+function manage(){const[ci,cj]=cof(px,pz),near=(i,j,r)=>Math.max(Math.abs(i-ci),Math.abs(j-cj))<=r;
+ for(const k of[...chunks.keys()]){const[a,b]=k.split(",").map(Number);if(!near(a,b,UR))drop(k)}
+ const want=[];for(let a=-LR;a<=LR;a++)for(let b=-LR;b<=LR;b++)want.push([ci+a,cj+b,Math.abs(a)+Math.abs(b)]);want.sort((p,q)=>p[2]-q[2]);
+ for(const[i,j]of want){const k=ck(i,j);if(chunks.has(k)||fly.has(k)||(retry[k]||0)>performance.now())continue;
+  if(cache.has(k)){mkChunk(i,j,cache.get(k));continue}
+  if(offline){const[x0,z0]=org(i,j),D=synth(x0,z0,x0+C,z0+C);cache.set(k,D);mkChunk(i,j,D);continue}
+  if(fly.size>=2)continue;fly.add(k);const g0=gen;
+  fetchChunk(i,j).then(D=>{if(g0!=gen)return;okOnce=1;fly.delete(k);if(cache.size>150)cache.delete(cache.keys().next().value);cache.set(k,D);if(near(i,j,UR))mkChunk(i,j,D)})
+   .catch(()=>{if(g0!=gen)return;fly.delete(k);if(!okOnce)offline=1;else retry[k]=performance.now()+6000})}
+ if(needSpawn&&chunks.has(ck(0,0))){for(let r=0;blocked(px,pz)&&r<80;r+=2){const a=r*1.7;px=Math.cos(a)*r;pz=Math.sin(a)*r}needSpawn=0}
+ const t=performance.now();if(t-ms>500){ms=t;$("#st").textContent=(offline?"Sample city":"Real map data")+" · "+chunks.size+" chunks loaded"+(fly.size?", "+fly.size+" loading":"")}}
 // ---- player
 const P=new THREE.Group(),mt=c=>new THREE.MeshLambertMaterial({color:c}),bx=(w,h,d,c,x,y,z)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mt(c));m.position.set(x,y,z);return m},
  limb=(x,y,h,c)=>{const g=new THREE.Group();g.position.set(x,y,0);g.add(bx(.25,h,.25,c,0,-h/2,0));return g},
@@ -64,9 +87,8 @@ const mm=L.map("mm",{zoomControl:false,attributionControl:false,dragging:false,s
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(mm);
 const mk=L.marker([lat0,lon0],{icon:L.divIcon({className:"",html:'<div class="me">▲</div>',iconSize:[20,20]}),interactive:false}).addTo(mm);
 mm.on("click",e=>load(e.latlng.lat,e.latlng.lng));
-async function load(la,lo){lat0=la;lon0=lo;$("#st").textContent="Generating world from map data…";let D;
- try{D=await fetchOSM();if(D.bld.length+D.roads.length<3)throw 0;$("#st").textContent="Real map data loaded"}catch(e){D=synth();$("#st").textContent="Map data unavailable, generated a sample city"}
- build(D);px=pz=0;for(let r=0;blocked(px,pz)&&r<80;r+=2){const a=r*1.7;px=Math.cos(a)*r;pz=Math.sin(a)*r}mm.setView([la,lo],17,{animate:false});setTimeout(()=>$("#st").textContent="",4000)}
+const rects=L.layerGroup().addTo(mm);
+function load(la,lo){lat0=la;lon0=lo;gen++;for(const k of[...chunks.keys()])drop(k);cache.clear();fly.clear();for(const k in retry)delete retry[k];offline=okOnce=0;px=pz=0;needSpawn=1;mm.setView([la,lo],17,{animate:false})}
 // ---- input
 const K={};addEventListener("keydown",e=>K[e.key.toLowerCase()]=1);addEventListener("keyup",e=>K[e.key.toLowerCase()]=0);
 let jx=0,jy=0;const joy=$("#joy"),kn=$("#kn");
@@ -88,7 +110,7 @@ function tick(n){const dt=Math.min(.05,(n-last)/1000);last=n;
   lL.rotation.x=Math.sin(wt)*.8;lR.rotation.x=-Math.sin(wt)*.8;aL.rotation.x=-Math.sin(wt)*.7;aR.rotation.x=Math.sin(wt)*.7;
   if(n-mt0>150){mt0=n;const[la,lo]=unproj(px,pz);mk.setLatLng([la,lo]);mm.setView([la,lo],17,{animate:false});const el=mk.getElement();el&&(el.firstChild.style.transform=`rotate(${(Math.PI-face)*180/Math.PI}deg)`)}}
  else{lL.rotation.x*=.8;lR.rotation.x*=.8;aL.rotation.x*=.8;aR.rotation.x*=.8}
- P.position.set(px,0,pz);P.rotation.y=face;
+ manage();ground.position.set(px,0,pz);P.position.set(px,0,pz);P.rotation.y=face;
  cam.position.set(px+Math.sin(yaw)*Math.cos(pit)*dst,1.6+Math.sin(pit)*dst,pz+Math.cos(yaw)*Math.cos(pit)*dst);cam.lookAt(px,1.6,pz);
  R.render(sc,cam);requestAnimationFrame(tick)}
 requestAnimationFrame(tick);
