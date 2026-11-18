@@ -526,7 +526,35 @@
 
       // Ground plane
       const groundGeo = new THREE.PlaneGeometry(200, 200);
-      const groundMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.9 });
+      
+      // Create a dynamic canvas texture using map tiles
+      const canvasTex = document.createElement('canvas');
+      canvasTex.width = 1024;
+      canvasTex.height = 1024;
+      const ctx = canvasTex.getContext('2d');
+      
+      // Draw grid / map tile representation
+      ctx.fillStyle = '#cbd5e1';
+      ctx.fillRect(0, 0, 1024, 1024);
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 4;
+      for(let i=0; i<=1024; i+=128) {
+        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 1024); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(1024, i); ctx.stroke();
+      }
+      // Draw center marker
+      ctx.fillStyle = '#2563eb';
+      ctx.beginPath(); ctx.arc(512, 512, 16, 0, Math.PI*2); ctx.fill();
+
+      const groundTexture = new THREE.CanvasTexture(canvasTex);
+      groundTexture.wrapS = THREE.RepeatWrapping;
+      groundTexture.wrapT = THREE.RepeatWrapping;
+      groundTexture.repeat.set(4, 4);
+
+      const groundMat = new THREE.MeshStandardMaterial({ 
+        map: groundTexture, 
+        roughness: 0.8 
+      });
       const ground = new THREE.Mesh(groundGeo, groundMat);
       ground.rotation.x = -Math.PI / 2;
       ground.receiveShadow = true;
