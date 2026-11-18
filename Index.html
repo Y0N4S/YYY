@@ -1,118 +1,1878 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"><title>Atlas World</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<style>
-html,body{margin:0;height:100%;overflow:hidden;background:#9cc8ee;font:13px system-ui,-apple-system,"Segoe UI",sans-serif;touch-action:none;user-select:none;-webkit-user-select:none}
-#g{position:fixed;inset:0;width:100%;height:100%;touch-action:none}
-#mm{position:fixed;left:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));width:170px;height:170px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 10px rgba(0,0,0,.5);z-index:5;background:#ddd}
-.me{color:#d93025;font-size:20px;text-align:center;line-height:20px;text-shadow:0 0 3px #fff}
-#hud{position:fixed;left:12px;top:calc(10px + env(safe-area-inset-top,0px));right:12px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.8);z-index:5;pointer-events:none}
-#st{font-weight:600;font-size:15px}
-#joy{position:fixed;right:22px;bottom:calc(30px + env(safe-area-inset-bottom,0px));width:130px;height:130px;border-radius:50%;background:rgba(255,255,255,.25);border:2px solid rgba(255,255,255,.6);z-index:5;touch-action:none}
-#kn{position:absolute;left:35px;top:35px;width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,.7)}
-#at{position:fixed;left:190px;bottom:calc(8px + env(safe-area-inset-bottom,0px));color:#fff;font-size:10px;text-shadow:0 1px 2px #000;z-index:5}
-</style></head><body>
-<canvas id="g"></canvas><div id="mm"></div>
-<div id="hud"><div id="st">Finding you…</div><div>WASD / joystick: walk · drag: look · Shift: run · tap minimap: travel</div></div>
-<div id="joy"><div id="kn"></div></div><div id="at">Map data © OpenStreetMap contributors</div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script>
-const $=s=>document.querySelector(s),rnd=n=>Math.abs(Math.sin(n*12.9898)*43758.5453)%1;
-const R=new THREE.WebGLRenderer({canvas:$("#g"),antialias:true});R.setPixelRatio(Math.min(devicePixelRatio,2));
-const sc=new THREE.Scene();sc.background=new THREE.Color(0x9cc8ee);sc.fog=new THREE.Fog(0x9cc8ee,90,300);
-const cam=new THREE.PerspectiveCamera(60,1,.5,800);
-sc.add(new THREE.HemisphereLight(0xffffff,0x667755,.95));const sun=new THREE.DirectionalLight(0xffffff,.7);sun.position.set(100,200,60);sc.add(sun);
-function rs(){R.setSize(innerWidth,innerHeight,false);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()}addEventListener("resize",rs);rs();
-let lat0=43.7647,lon0=-79.1865,W=new THREE.Group(),solid=[];sc.add(W);
-const KX=()=>111320*Math.cos(lat0*Math.PI/180),proj=(la,lo)=>[(lo-lon0)*KX(),-(la-lat0)*110540],unproj=(x,z)=>[lat0-z/110540,lon0+x/KX()];
-// ---- chunks: streamed in and out around the player
-const C=210,LR=1,UR=2,chunks=new Map(),cache=new Map(),fly=new Set(),retry={};let offline=0,okOnce=0,gen=0,needSpawn=1,ms=0;
-const ck=(i,j)=>i+","+j,cof=(x,z)=>[Math.floor((x+C/2)/C),Math.floor((z+C/2)/C)],org=(i,j)=>[i*C-C/2,j*C-C/2];
-const ground=new THREE.Mesh(new THREE.PlaneGeometry(1400,1400),new THREE.MeshLambertMaterial({color:0xc8c5b8}));ground.rotation.x=-Math.PI/2;sc.add(ground);
-const pal=[0xd9d2c5,0xc9b8a6,0xb8c4cc,0xe2cdb4,0xa9a9b5,0xcfa89a].map(c=>new THREE.MeshLambertMaterial({color:c})),
- parkM=new THREE.MeshLambertMaterial({color:0x8fbf73,side:THREE.DoubleSide}),waterM=new THREE.MeshLambertMaterial({color:0x6fa8dc,side:THREE.DoubleSide});
-const pip=(x,z,p)=>{let o=false;for(let i=0,j=p.length-1;i<p.length;j=i++)if((p[i][1]>z)!=(p[j][1]>z)&&x<(p[j][0]-p[i][0])*(z-p[i][1])/(p[j][1]-p[i][1])+p[i][0])o=!o;return o};
-const box4=p=>{const X=p.map(a=>a[0]),Z=p.map(a=>a[1]);return{pts:p,x0:Math.min(...X),x1:Math.max(...X),z0:Math.min(...Z),z1:Math.max(...Z)}};
-const shape=p=>new THREE.Shape(p.map(a=>new THREE.Vector2(a[0],-a[1])));
-function flat(G,polys,m,y){for(const p of polys){if(p.length<3)continue;const g=new THREE.ShapeGeometry(shape(p));g.rotateX(-Math.PI/2);g.translate(0,y,0);G.add(new THREE.Mesh(g,m))}}
-async function fetchChunk(i,j){const[x0,z0]=org(i,j),[n,w]=unproj(x0,z0),[s,e]=unproj(x0+C,z0+C),b=`(${s},${w},${n},${e})`,
- q=`[out:json][timeout:25];(way["building"]${b};way["highway"]${b};way["natural"="water"]${b};way["leisure"~"park|garden|pitch"]${b};);out geom 1500;`,
- r=await fetch("https://overpass-api.de/api/interpreter",{method:"POST",body:"data="+encodeURIComponent(q)});if(!r.ok)throw 0;
- const J=await r.json(),D={roads:[],bld:[],water:[],park:[]};
- for(const e2 of J.elements){if(!e2.geometry)continue;const pts=e2.geometry.map(p=>proj(p.lat,p.lon)),t=e2.tags||{};
-  if(t.building)D.bld.push({pts,h:parseFloat(t.height)||(+t["building:levels"]||0)*3.2||6+rnd(e2.id)*12,c:e2.id});
-  else if(t.highway)D.roads.push({pts,w:/motorway|trunk|primary/.test(t.highway)?11:/secondary|tertiary/.test(t.highway)?8:/foot|path|cycle|steps|pedestrian/.test(t.highway)?2:6});
-  else if(t.natural=="water")D.water.push(pts);else D.park.push(pts)}return D}
-function synth(x0,z0,x1,z1){const D={roads:[],bld:[],water:[],park:[]};
- for(let i=Math.ceil(x0/70);i*70<x1;i++)D.roads.push({pts:[[i*70,z0],[i*70,z1]],w:i%2?6:9});
- for(let j=Math.ceil(z0/70);j*70<z1;j++)D.roads.push({pts:[[x0,j*70],[x1,j*70]],w:j%2?6:9});
- for(let i=Math.floor(x0/70);i*70<x1;i++)for(let j=Math.floor(z0/70);j*70<z1;j++){const x=i*70+12,z=j*70+12;if(x<x0||x>=x1||z<z0||z>=z1)continue;
-  if((i+j)%7==0){D.park.push([[x,z],[x+46,z],[x+46,z+46],[x,z+46]]);continue}
-  for(let a=0;a<2;a++)for(let b=0;b<2;b++){const r=rnd(i*97+j*13+a*5+b);if(r>.15){const X=x+a*24,Z=z+b*24;D.bld.push({pts:[[X,Z],[X+20,Z],[X+20,Z+20],[X,Z+20]],h:6+r*40,c:r*1e4})}}}return D}
-// turn one chunk's data into meshes; returns its collision list
-function build(D,G,x0,z0){const solid=[];flat(G,D.park,parkM,.08);flat(G,D.water,waterM,.12);D.water.forEach(p=>solid.push(box4(p)));
- const pos=[],col=[];for(const r of D.roads){const c=new THREE.Color(r.w==2?0xa89f91:0x3d4148);
-  for(let i=1;i<r.pts.length;i++){const[a,b]=[r.pts[i-1],r.pts[i]],dx=b[0]-a[0],dz=b[1]-a[1],l=Math.hypot(dx,dz);if(!l)continue;const nx=-dz/l*r.w/2,nz=dx/l*r.w/2,
-   v=[[a[0]+nx,a[1]+nz],[a[0]-nx,a[1]-nz],[b[0]+nx,b[1]+nz],[b[0]-nx,b[1]-nz]];for(const k of[0,1,2,1,3,2]){pos.push(v[k][0],.16,v[k][1]);col.push(c.r,c.g,c.b)}}}
- const rg=new THREE.BufferGeometry();rg.setAttribute("position",new THREE.Float32BufferAttribute(pos,3));rg.setAttribute("color",new THREE.Float32BufferAttribute(col,3));G.add(new THREE.Mesh(rg,new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide})));
- for(const b of D.bld){if(b.pts.length<3)continue;const g=new THREE.ExtrudeGeometry(shape(b.pts),{depth:b.h,bevelEnabled:false});g.rotateX(-Math.PI/2);G.add(new THREE.Mesh(g,pal[Math.floor(rnd(b.c)*6)]));solid.push(box4(b.pts))}
- const T=[];for(const p of D.park){const bb=box4(p),n=Math.min(300,(bb.x1-bb.x0)*(bb.z1-bb.z0)/150|0);for(let k=0;k<n;k++){const x=bb.x0+rnd(p[0][0]*7+k)*(bb.x1-bb.x0),z=bb.z0+rnd(p[0][1]*13+k+.5)*(bb.z1-bb.z0);if(x>=x0&&x<x0+C&&z>=z0&&z<z0+C&&pip(x,z,p))T.push([x,z])}}
- if(T.length){const f=new THREE.InstancedMesh(new THREE.ConeGeometry(2,5,6),new THREE.MeshLambertMaterial({color:0x3f8f4a}),T.length),t=new THREE.InstancedMesh(new THREE.CylinderGeometry(.3,.4,1.6),new THREE.MeshLambertMaterial({color:0x6b4a2f}),T.length),d=new THREE.Object3D();
-  T.forEach((p,i)=>{const s=.7+rnd(i+p[0])*.8;d.scale.set(s,s,s);d.position.set(p[0],3.2*s,p[1]);d.updateMatrix();f.setMatrixAt(i,d.matrix);d.position.set(p[0],.8*s,p[1]);d.updateMatrix();t.setMatrixAt(i,d.matrix)});G.add(f,t)}
- return solid}
-function mkChunk(i,j,D){const g=new THREE.Group(),[x0,z0]=org(i,j),[n,w]=unproj(x0,z0),[s,e]=unproj(x0+C,z0+C);sc.add(g);
- chunks.set(ck(i,j),{g,solid:build(D,g,x0,z0),r:L.rectangle([[s,w],[n,e]],{color:"#1a73e8",weight:1,fillOpacity:.05,interactive:false}).addTo(rects)})}
-function drop(k){const c=chunks.get(k);c.g.traverse(o=>{o.geometry&&o.geometry.dispose();o.dispose&&o.dispose()});sc.remove(c.g);rects.removeLayer(c.r);chunks.delete(k)}
-const blocked=(x,z)=>{const c=chunks.get(ck(...cof(x,z)));return!c||c.solid.some(b=>x>b.x0&&x<b.x1&&z>b.z0&&z<b.z1&&pip(x,z,b.pts))};
-// decide each frame which chunks to build, fetch, keep or free
-function manage(){const[ci,cj]=cof(px,pz),near=(i,j,r)=>Math.max(Math.abs(i-ci),Math.abs(j-cj))<=r;
- for(const k of[...chunks.keys()]){const[a,b]=k.split(",").map(Number);if(!near(a,b,UR))drop(k)}
- const want=[];for(let a=-LR;a<=LR;a++)for(let b=-LR;b<=LR;b++)want.push([ci+a,cj+b,Math.abs(a)+Math.abs(b)]);want.sort((p,q)=>p[2]-q[2]);
- for(const[i,j]of want){const k=ck(i,j);if(chunks.has(k)||fly.has(k)||(retry[k]||0)>performance.now())continue;
-  if(cache.has(k)){mkChunk(i,j,cache.get(k));continue}
-  if(offline){const[x0,z0]=org(i,j),D=synth(x0,z0,x0+C,z0+C);cache.set(k,D);mkChunk(i,j,D);continue}
-  if(fly.size>=2)continue;fly.add(k);const g0=gen;
-  fetchChunk(i,j).then(D=>{if(g0!=gen)return;okOnce=1;fly.delete(k);if(cache.size>150)cache.delete(cache.keys().next().value);cache.set(k,D);if(near(i,j,UR))mkChunk(i,j,D)})
-   .catch(()=>{if(g0!=gen)return;fly.delete(k);if(!okOnce)offline=1;else retry[k]=performance.now()+6000})}
- if(needSpawn&&chunks.has(ck(0,0))){for(let r=0;blocked(px,pz)&&r<80;r+=2){const a=r*1.7;px=Math.cos(a)*r;pz=Math.sin(a)*r}needSpawn=0}
- const t=performance.now();if(t-ms>500){ms=t;$("#st").textContent=(offline?"Sample city":"Real map data")+" · "+chunks.size+" chunks loaded"+(fly.size?", "+fly.size+" loading":"")}}
-// ---- player
-const P=new THREE.Group(),mt=c=>new THREE.MeshLambertMaterial({color:c}),bx=(w,h,d,c,x,y,z)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mt(c));m.position.set(x,y,z);return m},
- limb=(x,y,h,c)=>{const g=new THREE.Group();g.position.set(x,y,0);g.add(bx(.25,h,.25,c,0,-h/2,0));return g},
- lL=limb(-.17,.8,.8,0x2b3a67),lR=limb(.17,.8,.8,0x2b3a67),aL=limb(-.42,1.55,.7,0xf1c27d),aR=limb(.42,1.55,.7,0xf1c27d);
-P.add(bx(.6,.8,.35,0xe0533d,0,1.2,0),bx(.4,.4,.4,0xf1c27d,0,1.85,0),bx(.42,.15,.42,0x333333,0,2.1,0),lL,lR,aL,aR);sc.add(P);
-let px=0,pz=0,yaw=0,pit=.5,dst=9,face=0,wt=0;
-// ---- minimap
-const mm=L.map("mm",{zoomControl:false,attributionControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,touchZoom:false,boxZoom:false,keyboard:false}).setView([lat0,lon0],17);
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(mm);
-const mk=L.marker([lat0,lon0],{icon:L.divIcon({className:"",html:'<div class="me">▲</div>',iconSize:[20,20]}),interactive:false}).addTo(mm);
-mm.on("click",e=>load(e.latlng.lat,e.latlng.lng));
-const rects=L.layerGroup().addTo(mm);
-function load(la,lo){lat0=la;lon0=lo;gen++;for(const k of[...chunks.keys()])drop(k);cache.clear();fly.clear();for(const k in retry)delete retry[k];offline=okOnce=0;px=pz=0;needSpawn=1;mm.setView([la,lo],17,{animate:false})}
-// ---- input
-const K={};addEventListener("keydown",e=>K[e.key.toLowerCase()]=1);addEventListener("keyup",e=>K[e.key.toLowerCase()]=0);
-let jx=0,jy=0;const joy=$("#joy"),kn=$("#kn");
-function jm(e){const r=joy.getBoundingClientRect();let x=e.clientX-r.left-65,y=e.clientY-r.top-65;const l=Math.hypot(x,y),m=50;if(l>m){x*=m/l;y*=m/l}kn.style.transform=`translate(${x}px,${y}px)`;jx=x/m;jy=-y/m}
-joy.addEventListener("pointerdown",e=>{joy.setPointerCapture(e.pointerId);jm(e)});joy.addEventListener("pointermove",e=>e.buttons&&jm(e));
-const je=()=>{jx=jy=0;kn.style.transform=""};joy.addEventListener("pointerup",je);joy.addEventListener("pointercancel",je);
-const cv=$("#g");let dr=null;cv.addEventListener("pointerdown",e=>{dr=e.pointerId;cv.setPointerCapture(dr)});cv.addEventListener("pointerup",()=>dr=null);
-cv.addEventListener("pointermove",e=>{if(e.pointerId==dr){yaw-=e.movementX*.006;pit=Math.max(.1,Math.min(1.3,pit+e.movementY*.004))}});
-let lx,ly;cv.addEventListener("touchstart",e=>{lx=e.touches[0].clientX;ly=e.touches[0].clientY},{passive:true});
-cv.addEventListener("touchmove",e=>{const t=e.touches[0];yaw-=(t.clientX-lx)*.006;pit=Math.max(.1,Math.min(1.3,pit+(t.clientY-ly)*.004));lx=t.clientX;ly=t.clientY},{passive:true});
-cv.addEventListener("wheel",e=>dst=Math.max(4,Math.min(30,dst+e.deltaY*.01)));
-// ---- loop
-let last=performance.now(),mt0=0;
-function tick(n){const dt=Math.min(.05,(n-last)/1000);last=n;
- let ix=jx+(K.d||K.arrowright?1:0)-(K.a||K.arrowleft?1:0),iy=jy+(K.w||K.arrowup?1:0)-(K.s||K.arrowdown?1:0);const m=Math.min(1,Math.hypot(ix,iy));
- if(m>.05){const s=Math.sin(yaw),c=Math.cos(yaw),dx=ix*c-iy*s,dz=-ix*s-iy*c,l=Math.hypot(dx,dz),v=(K.shift?10:5)*m*dt;
-  const nx=px+dx/l*v,nz=pz+dz/l*v;if(!blocked(nx,pz))px=nx;if(!blocked(px,nz))pz=nz;
-  let d=Math.atan2(dx,dz)-face;d=Math.atan2(Math.sin(d),Math.cos(d));face+=d*Math.min(1,dt*12);wt+=dt*(K.shift?14:9)*m;
-  lL.rotation.x=Math.sin(wt)*.8;lR.rotation.x=-Math.sin(wt)*.8;aL.rotation.x=-Math.sin(wt)*.7;aR.rotation.x=Math.sin(wt)*.7;
-  if(n-mt0>150){mt0=n;const[la,lo]=unproj(px,pz);mk.setLatLng([la,lo]);mm.setView([la,lo],17,{animate:false});const el=mk.getElement();el&&(el.firstChild.style.transform=`rotate(${(Math.PI-face)*180/Math.PI}deg)`)}}
- else{lL.rotation.x*=.8;lR.rotation.x*=.8;aL.rotation.x*=.8;aR.rotation.x*=.8}
- manage();ground.position.set(px,0,pz);P.position.set(px,0,pz);P.rotation.y=face;
- cam.position.set(px+Math.sin(yaw)*Math.cos(pit)*dst,1.6+Math.sin(pit)*dst,pz+Math.cos(yaw)*Math.cos(pit)*dst);cam.lookAt(px,1.6,pz);
- R.render(sc,cam);requestAnimationFrame(tick)}
-requestAnimationFrame(tick);
-navigator.geolocation?navigator.geolocation.getCurrentPosition(p=>load(p.coords.latitude,p.coords.longitude),()=>load(lat0,lon0),{timeout:8000}):load(lat0,lon0);
-</script></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Google Maps Clone</title>
+
+  <!-- Google Font: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    * {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #e5e3df;
+    }
+
+    #map {
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+
+    /* Hide default Leaflet zoom controls (we build custom bottom-right Google-style controls) */
+    .leaflet-control-zoom {
+      display: none !important;
+    }
+
+    .leaflet-control-attribution {
+      font-size: 10px !important;
+      background: rgba(255, 255, 255, 0.78) !important;
+      backdrop-filter: blur(4px);
+      padding: 2px 6px !important;
+      border-top-left-radius: 6px;
+      color: #5f6368 !important;
+    }
+
+    /* Custom Scrollbars */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
+    .thin-scrollbar::-webkit-scrollbar {
+      width: 6px;
+    }
+    .thin-scrollbar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .thin-scrollbar::-webkit-scrollbar-thumb {
+      background: #dadce0;
+      border-radius: 9999px;
+    }
+    .thin-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #bdc1c6;
+    }
+
+    /* Google Pin Drop Animation */
+    @keyframes pinDrop {
+      0% {
+        transform: translateY(-24px) scale(0.8);
+        opacity: 0;
+      }
+      70% {
+        transform: translateY(3px) scale(1.05);
+        opacity: 1;
+      }
+      100% {
+        transform: translateY(0) scale(1);
+        opacity: 1;
+      }
+    }
+
+    .google-pin-wrapper {
+      animation: pinDrop 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+
+    /* User Pulse Dot */
+    @keyframes userPulse {
+      0% {
+        transform: scale(0.85);
+        opacity: 0.75;
+      }
+      70% {
+        transform: scale(2.2);
+        opacity: 0;
+      }
+      100% {
+        transform: scale(2.2);
+        opacity: 0;
+      }
+    }
+
+    .user-pulse-ring {
+      animation: userPulse 2s infinite ease-out;
+    }
+
+    /* Street View Panoramic Simulation */
+    .streetview-panorama {
+      background-size: 200% 100%;
+      transition: background-position 0.1s linear;
+      cursor: grab;
+    }
+    .streetview-panorama:active {
+      cursor: grabbing;
+    }
+  </style>
+</head>
+<body class="relative w-full h-full select-none text-[#202124]">
+
+  <!-- Full-Viewport Interactive Map -->
+  <div id="map"></div>
+
+  <!-- Top Floating Search Bar + Category Chips -->
+  <div id="top-ui-container" class="fixed top-3 left-3 right-3 sm:right-auto z-30 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pointer-events-none">
+    
+    <!-- Search Pill Box -->
+    <div class="relative w-full sm:w-[392px] pointer-events-auto">
+      <div class="flex items-center bg-white rounded-full shadow-[0_2px_6px_rgba(60,64,67,0.28)] border border-gray-100 h-12 px-3 transition-shadow focus-within:shadow-[0_4px_12px_rgba(60,64,67,0.32)]">
+        <!-- Hamburger / Saved Places Menu Button -->
+        <button id="btn-menu" title="Saved places & menu" class="p-2 rounded-full hover:bg-gray-100 text-[#5f6368] transition-colors flex-shrink-0">
+          <i data-lucide="menu" class="w-5 h-5"></i>
+        </button>
+
+        <!-- Search Input -->
+        <input
+          id="search-input"
+          type="text"
+          autocomplete="off"
+          placeholder="Search Google Maps"
+          class="w-full px-2.5 text-[15px] text-[#202124] placeholder-[#70757a] bg-transparent outline-none"
+        />
+
+        <!-- Clear Search Button -->
+        <button id="btn-clear-search" title="Clear search" class="hidden p-1.5 rounded-full hover:bg-gray-100 text-[#5f6368] transition-colors flex-shrink-0">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+
+        <!-- Search Submit Button -->
+        <button id="btn-search-submit" title="Search" class="p-2 rounded-full hover:bg-gray-100 text-[#5f6368] transition-colors flex-shrink-0">
+          <i data-lucide="search" class="w-5 h-5"></i>
+        </button>
+
+        <!-- Vertical Divider -->
+        <div class="h-6 w-[1px] bg-gray-200 mx-1 flex-shrink-0"></div>
+
+        <!-- Directions Blue Diamond Button -->
+        <button id="btn-open-directions" title="Directions" class="p-2 rounded-full hover:bg-blue-50 text-[#1A73E8] transition-colors flex-shrink-0">
+          <div class="w-6 h-6 bg-[#1A73E8] rounded-md rotate-45 flex items-center justify-center shadow-sm">
+            <i data-lucide="corner-up-right" class="w-3.5 h-3.5 text-white -rotate-45"></i>
+          </div>
+        </button>
+      </div>
+
+      <!-- Search Autocomplete Dropdown -->
+      <div id="search-dropdown" class="hidden mt-1.5 bg-white rounded-2xl shadow-[0_4px_16px_rgba(60,64,67,0.28)] border border-gray-100 overflow-hidden max-h-[340px] overflow-y-auto thin-scrollbar">
+        <!-- Populated dynamically -->
+      </div>
+    </div>
+
+    <!-- Horizontal Category Chips -->
+    <div id="category-chips" class="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5 pointer-events-auto max-w-full sm:max-w-[calc(100vw-430px)]">
+      <button data-category="restaurant" class="category-chip flex items-center gap-1.5 bg-white hover:bg-gray-50 text-[#3c4043] text-[13px] font-medium px-3.5 py-2 rounded-full shadow-[0_1px_4px_rgba(60,64,67,0.25)] border border-gray-100 whitespace-nowrap transition-all">
+        <i data-lucide="utensils" class="w-4 h-4 text-[#EA4335]"></i>
+        <span>Restaurants</span>
+      </button>
+      <button data-category="cafe" class="category-chip flex items-center gap-1.5 bg-white hover:bg-gray-50 text-[#3c4043] text-[13px] font-medium px-3.5 py-2 rounded-full shadow-[0_1px_4px_rgba(60,64,67,0.25)] border border-gray-100 whitespace-nowrap transition-all">
+        <i data-lucide="coffee" class="w-4 h-4 text-[#9334E6]"></i>
+        <span>Coffee</span>
+      </button>
+      <button data-category="hotel" class="category-chip flex items-center gap-1.5 bg-white hover:bg-gray-50 text-[#3c4043] text-[13px] font-medium px-3.5 py-2 rounded-full shadow-[0_1px_4px_rgba(60,64,67,0.25)] border border-gray-100 whitespace-nowrap transition-all">
+        <i data-lucide="bed" class="w-4 h-4 text-[#E52592]"></i>
+        <span>Hotels</span>
+      </button>
+      <button data-category="park" class="category-chip flex items-center gap-1.5 bg-white hover:bg-gray-50 text-[#3c4043] text-[13px] font-medium px-3.5 py-2 rounded-full shadow-[0_1px_4px_rgba(60,64,67,0.25)] border border-gray-100 whitespace-nowrap transition-all">
+        <i data-lucide="trees" class="w-4 h-4 text-[#188038]"></i>
+        <span>Parks</span>
+      </button>
+      <button data-category="transit" class="category-chip flex items-center gap-1.5 bg-white hover:bg-gray-50 text-[#3c4043] text-[13px] font-medium px-3.5 py-2 rounded-full shadow-[0_1px_4px_rgba(60,64,67,0.25)] border border-gray-100 whitespace-nowrap transition-all">
+        <i data-lucide="train-front" class="w-4 h-4 text-[#1A73E8]"></i>
+        <span>Transit</span>
+      </button>
+      <button data-category="gas" class="category-chip flex items-center gap-1.5 bg-white hover:bg-gray-50 text-[#3c4043] text-[13px] font-medium px-3.5 py-2 rounded-full shadow-[0_1px_4px_rgba(60,64,67,0.25)] border border-gray-100 whitespace-nowrap transition-all">
+        <i data-lucide="fuel" class="w-4 h-4 text-[#F9AB00]"></i>
+        <span>Gas</span>
+      </button>
+      <button data-category="museum" class="category-chip flex items-center gap-1.5 bg-white hover:bg-gray-50 text-[#3c4043] text-[13px] font-medium px-3.5 py-2 rounded-full shadow-[0_1px_4px_rgba(60,64,67,0.25)] border border-gray-100 whitespace-nowrap transition-all">
+        <i data-lucide="landmark" class="w-4 h-4 text-[#12B5CB]"></i>
+        <span>Museums</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Left Collapsible Side Drawer (Place Details / Directions / Saved Places) -->
+  <aside
+    id="side-drawer"
+    class="fixed left-0 top-0 bottom-0 w-full sm:w-[408px] bg-white shadow-[4px_0_18px_rgba(60,64,67,0.24)] z-20 transform -translate-x-full transition-transform duration-300 ease-out flex flex-col pt-20 sm:pt-[74px]"
+  >
+    <!-- Drawer Close / Collapse Handle (Desktop) -->
+    <button
+      id="btn-close-drawer"
+      title="Close panel"
+      class="hidden sm:flex items-center justify-center absolute -right-6 top-1/2 -translate-y-1/2 w-6 h-12 bg-white rounded-r-lg shadow-[2px_0_8px_rgba(60,64,67,0.2)] border-y border-r border-gray-200 text-[#5f6368] hover:text-[#202124]"
+    >
+      <i data-lucide="chevron-left" class="w-4 h-4"></i>
+    </button>
+
+    <!-- Mobile Close Top Bar -->
+    <div class="flex sm:hidden items-center justify-between px-4 py-2 border-b border-gray-100">
+      <span id="mobile-drawer-title" class="text-xs font-semibold uppercase tracking-wider text-[#5f6368]">Details</span>
+      <button id="btn-close-drawer-mobile" class="p-1.5 rounded-full hover:bg-gray-100 text-[#5f6368]">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+
+    <!-- Drawer Content Body -->
+    <div id="drawer-body" class="flex-1 overflow-y-auto thin-scrollbar">
+      <!-- Dynamically populated with Place Details, Directions, or Saved Places -->
+    </div>
+  </aside>
+
+  <!-- Bottom-Left Layers Thumbnail Switcher -->
+  <div id="layers-widget" class="fixed bottom-5 left-3 z-20 flex items-end gap-2.5">
+    <!-- Main Layers Square Button -->
+    <button
+      id="btn-toggle-layers"
+      class="group relative w-[74px] h-[74px] rounded-xl overflow-hidden bg-white p-1 shadow-[0_2px_8px_rgba(60,64,67,0.3)] border border-white hover:scale-[1.02] transition-transform"
+    >
+      <div id="layers-preview-bg" class="w-full h-full rounded-lg bg-gradient-to-br from-emerald-100 via-amber-50 to-sky-200 relative overflow-hidden">
+        <!-- Mini stylized road grid -->
+        <div class="absolute inset-0 opacity-60">
+          <div class="w-full h-1.5 bg-amber-300 rotate-12 translate-y-4"></div>
+          <div class="w-1.5 h-full bg-white -rotate-12 translate-x-6"></div>
+          <div class="w-5 h-5 rounded-full bg-sky-300/70 absolute top-2 right-2"></div>
+        </div>
+        <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/40 to-transparent py-1 px-1.5 flex items-center justify-center gap-1 text-white">
+          <i data-lucide="layers" class="w-3 h-3"></i>
+          <span class="text-[11px] font-medium tracking-tight">Layers</span>
+        </div>
+      </div>
+    </button>
+
+    <!-- Expandable Layer Options Popover -->
+    <div
+      id="layers-popover"
+      class="hidden bg-white rounded-2xl shadow-[0_4px_16px_rgba(60,64,67,0.28)] border border-gray-100 p-3.5 w-[272px]"
+    >
+      <div class="flex items-center justify-between mb-2.5">
+        <span class="text-xs font-semibold text-[#5f6368] uppercase tracking-wider">Map Type</span>
+        <button id="btn-close-layers" class="p-1 rounded-full hover:bg-gray-100 text-[#5f6368]">
+          <i data-lucide="x" class="w-3.5 h-3.5"></i>
+        </button>
+      </div>
+      <div class="grid grid-cols-4 gap-2 mb-3.5">
+        <button data-layer="default" class="layer-option flex flex-col items-center gap-1 group">
+          <div class="w-12 h-12 rounded-xl border-2 border-[#1A73E8] bg-gradient-to-br from-emerald-100 via-amber-50 to-sky-200 shadow-sm overflow-hidden flex items-center justify-center">
+            <i data-lucide="map" class="w-5 h-5 text-[#1A73E8]"></i>
+          </div>
+          <span class="text-[11px] font-medium text-[#1A73E8]">Default</span>
+        </button>
+        <button data-layer="satellite" class="layer-option flex flex-col items-center gap-1 group">
+          <div class="w-12 h-12 rounded-xl border-2 border-transparent bg-gradient-to-br from-slate-800 via-emerald-900 to-teal-900 shadow-sm overflow-hidden flex items-center justify-center">
+            <i data-lucide="globe" class="w-5 h-5 text-emerald-300"></i>
+          </div>
+          <span class="text-[11px] font-medium text-[#5f6368]">Satellite</span>
+        </button>
+        <button data-layer="terrain" class="layer-option flex flex-col items-center gap-1 group">
+          <div class="w-12 h-12 rounded-xl border-2 border-transparent bg-gradient-to-br from-lime-200 via-stone-200 to-emerald-200 shadow-sm overflow-hidden flex items-center justify-center">
+            <i data-lucide="mountain" class="w-5 h-5 text-emerald-800"></i>
+          </div>
+          <span class="text-[11px] font-medium text-[#5f6368]">Terrain</span>
+        </button>
+        <button data-layer="dark" class="layer-option flex flex-col items-center gap-1 group">
+          <div class="w-12 h-12 rounded-xl border-2 border-transparent bg-gradient-to-br from-zinc-900 via-slate-900 to-neutral-800 shadow-sm overflow-hidden flex items-center justify-center">
+            <i data-lucide="moon" class="w-5 h-5 text-indigo-300"></i>
+          </div>
+          <span class="text-[11px] font-medium text-[#5f6368]">Dark</span>
+        </button>
+      </div>
+
+      <div class="border-t border-gray-100 pt-2.5">
+        <span class="text-xs font-semibold text-[#5f6368] uppercase tracking-wider block mb-2">Map Details</span>
+        <div class="grid grid-cols-2 gap-2">
+          <button id="toggle-transit-overlay" class="flex items-center gap-2 px-2.5 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 text-xs font-medium text-[#3c4043] transition-colors">
+            <i data-lucide="train-front" class="w-4 h-4 text-[#1A73E8]"></i>
+            <span>Transit</span>
+          </button>
+          <button id="toggle-traffic-overlay" class="flex items-center gap-2 px-2.5 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 text-xs font-medium text-[#3c4043] transition-colors">
+            <i data-lucide="car" class="w-4 h-4 text-[#188038]"></i>
+            <span>Traffic</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom-Right Navigation Controls (Locate Me, Zoom +/-, Pegman Street View) -->
+  <div class="fixed bottom-6 right-3 z-20 flex flex-col items-center gap-2.5">
+    <!-- Locate Me Button -->
+    <button
+      id="btn-locate-me"
+      title="Show your location"
+      class="w-10 h-10 bg-white rounded-xl shadow-[0_2px_6px_rgba(60,64,67,0.28)] border border-gray-100 flex items-center justify-center text-[#5f6368] hover:text-[#1A73E8] hover:bg-gray-50 transition-colors"
+    >
+      <i data-lucide="locate-fixed" class="w-5 h-5"></i>
+    </button>
+
+    <!-- Zoom In / Out Pill -->
+    <div class="bg-white rounded-xl shadow-[0_2px_6px_rgba(60,64,67,0.28)] border border-gray-100 flex flex-col overflow-hidden">
+      <button
+        id="btn-zoom-in"
+        title="Zoom in"
+        class="w-10 h-10 flex items-center justify-center text-[#5f6368] hover:text-[#202124] hover:bg-gray-50 transition-colors border-b border-gray-100"
+      >
+        <i data-lucide="plus" class="w-5 h-5"></i>
+      </button>
+      <button
+        id="btn-zoom-out"
+        title="Zoom out"
+        class="w-10 h-10 flex items-center justify-center text-[#5f6368] hover:text-[#202124] hover:bg-gray-50 transition-colors"
+      >
+        <i data-lucide="minus" class="w-5 h-5"></i>
+      </button>
+    </div>
+
+    <!-- Pegman / Street View Button -->
+    <button
+      id="btn-street-view"
+      title="Browse Street View"
+      class="w-10 h-10 bg-white rounded-xl shadow-[0_2px_6px_rgba(60,64,67,0.28)] border border-gray-100 flex items-center justify-center text-[#F9AB00] hover:bg-amber-50 transition-colors"
+    >
+      <i data-lucide="person-standing" class="w-5 h-5"></i>
+    </button>
+  </div>
+
+  <!-- Toast Notification Pill (Replaces any alert()) -->
+  <div
+    id="toast-banner"
+    class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 pointer-events-none opacity-0 translate-y-3 transition-all duration-300 bg-[#202124] text-white text-xs sm:text-sm font-medium px-4 py-2.5 rounded-full shadow-lg flex items-center gap-2"
+  >
+    <span id="toast-message">Notification</span>
+  </div>
+
+  <!-- Simulated 360° Street View Modal -->
+  <div id="streetview-modal" class="hidden fixed inset-0 z-50 bg-black/90 flex flex-col">
+    <!-- Top Header -->
+    <div class="flex items-center justify-between px-4 py-3 bg-gradient-to-b from-black/80 to-transparent text-white z-10">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-full bg-[#F9AB00]/20 border border-[#F9AB00] flex items-center justify-center text-[#F9AB00]">
+          <i data-lucide="compass" class="w-5 h-5"></i>
+        </div>
+        <div>
+          <h3 id="sv-title" class="text-sm font-semibold">Street View — Downtown Toronto</h3>
+          <p id="sv-coords" class="text-xs text-gray-300">43.6532° N, 79.3832° W • Drag horizontally to look around 360°</p>
+        </div>
+      </div>
+      <button id="btn-close-streetview" class="p-2 rounded-full bg-white/15 hover:bg-white/25 text-white transition-colors">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+
+    <!-- Interactive Draggable Panorama Canvas -->
+    <div
+      id="sv-panorama"
+      class="streetview-panorama flex-1 relative overflow-hidden flex items-center justify-center"
+      style="background-image: url('https://images.unsplash.com/photo-1517090504586-fde19ea6066f?auto=format&fit=crop&w=2400&q=80'); background-position: 50% 50%;"
+    >
+      <!-- Simulated Ground Direction Arrows -->
+      <div class="absolute bottom-16 left-1/2 -translate-x-1/2 flex items-center gap-6 pointer-events-none">
+        <div class="px-4 py-2 rounded-full bg-black/55 backdrop-blur-md border border-white/25 text-white text-xs flex items-center gap-2">
+          <i data-lucide="move-horizontal" class="w-4 h-4 text-[#F9AB00]"></i>
+          <span>Drag left or right to pan 360°</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // 1. STATE & CURATED TORONTO PLACE DATASET
+    // =========================================================================
+    const DEFAULT_CENTER = [43.6532, -79.3832]; // Downtown Toronto
+    const DEFAULT_ZOOM = 14;
+
+    const state = {
+      map: null,
+      activeBaseLayer: 'default',
+      baseLayers: {},
+      transitLayer: null,
+      trafficLayer: null,
+      transitActive: false,
+      trafficActive: false,
+      markersLayer: null,
+      routeLayer: null,
+      userMarker: null,
+      selectedPlace: null,
+      activeCategory: null,
+      drawerMode: null, // 'place' | 'directions' | 'saved'
+      travelMode: 'driving', // 'driving' | 'walking' | 'cycling' | 'transit'
+      originCoords: [43.6452, -79.3806], // Union Station default origin
+      originLabel: 'Union Station, Toronto',
+      destCoords: null,
+      destLabel: '',
+      savedPlaces: JSON.parse(localStorage.getItem('gmaps_clone_saved') || '[]'),
+      svPanX: 50,
+      svDragging: false,
+      svStartX: 0
+    };
+
+    // Rich curated landmarks & category spots around Toronto for instant zero-latency search & chips
+    const CURATED_PLACES = [
+      {
+        id: 'cn-tower',
+        name: 'CN Tower',
+        category: 'museum',
+        categoryLabel: 'Observation deck & landmark',
+        rating: 4.7,
+        reviews: 48210,
+        address: '290 Bremner Blvd, Toronto, ON M5V 3L9',
+        lat: 43.6426,
+        lng: -79.3871,
+        hours: 'Open • Closes 9:30 PM',
+        phone: '+1 416-868-6937',
+        website: 'cntower.ca',
+        photo: 'https://images.unsplash.com/photo-1517090504586-fde19ea6066f?auto=format&fit=crop&w=900&q=80',
+        description: 'Iconic 553.3m concrete communications and observation tower featuring glass floors and EdgeWalk.'
+      },
+      {
+        id: 'st-lawrence-market',
+        name: 'St. Lawrence Market',
+        category: 'restaurant',
+        categoryLabel: 'Historic food market & eateries',
+        rating: 4.7,
+        reviews: 31450,
+        address: '93 Front St E, Toronto, ON M5E 1C3',
+        lat: 43.6487,
+        lng: -79.3715,
+        hours: 'Open • Closes 7:00 PM',
+        phone: '+1 416-392-7219',
+        website: 'stlawrencemarket.com',
+        photo: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=900&q=80',
+        description: 'Renowned indoor public market featuring over 120 specialty food vendors, bakeries, and peameal bacon sandwiches.'
+      },
+      {
+        id: 'pai-northern-thai',
+        name: 'PAI Northern Thai Kitchen',
+        category: 'restaurant',
+        categoryLabel: 'Thai restaurant • $$',
+        rating: 4.6,
+        reviews: 9840,
+        address: '18 Duncan St, Toronto, ON M5H 3G8',
+        lat: 43.6479,
+        lng: -79.3887,
+        hours: 'Open • Closes 10:30 PM',
+        phone: '+1 416-901-4724',
+        website: 'paitoronto.com',
+        photo: 'https://images.unsplash.com/photo-1559314809-0d155014e29e?auto=format&fit=crop&w=900&q=80',
+        description: 'Lively subterranean eatery serving authentic Northern Thai street food, khao soi, and pad gra prow.'
+      },
+      {
+        id: 'alo-restaurant',
+        name: 'Alo Restaurant',
+        category: 'restaurant',
+        categoryLabel: 'Contemporary French • $$$$',
+        rating: 4.8,
+        reviews: 2150,
+        address: '163 Spadina Ave, Toronto, ON M5V 2L6',
+        lat: 43.6485,
+        lng: -79.3961,
+        hours: 'Opens 5:00 PM',
+        phone: '+1 416-260-2222',
+        website: 'alorestaurant.com',
+        photo: 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?auto=format&fit=crop&w=900&q=80',
+        description: 'Acclaimed tasting-menu restaurant atop a Victorian building offering refined contemporary French cuisine.'
+      },
+      {
+        id: 'dineen-coffee',
+        name: 'Dineen Coffee Co.',
+        category: 'cafe',
+        categoryLabel: 'Coffee shop • $$',
+        rating: 4.5,
+        reviews: 3420,
+        address: '140 Yonge St, Toronto, ON M5C 1X6',
+        lat: 43.6505,
+        lng: -79.3788,
+        hours: 'Open • Closes 7:00 PM',
+        phone: '+1 416-900-0949',
+        website: 'dineencoffee.com',
+        photo: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?auto=format&fit=crop&w=900&q=80',
+        description: 'Historic Temperance Building cafe known for handcrafted espresso, mosaic tile floors, and patio seating.'
+      },
+      {
+        id: 'balzacs-distillery',
+        name: "Balzac's Distillery District",
+        category: 'cafe',
+        categoryLabel: 'Coffee roasters • $$',
+        rating: 4.5,
+        reviews: 2890,
+        address: '1 Trinity St, Toronto, ON M5A 3C4',
+        lat: 43.6503,
+        lng: -79.3596,
+        hours: 'Open • Closes 8:00 PM',
+        phone: '+1 416-207-1709',
+        website: 'balzacs.com',
+        photo: 'https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=900&q=80',
+        description: 'Parisian-inspired two-story cafe housed inside a restored 1895 Victorian pump house.'
+      },
+      {
+        id: 'fairmont-royal-york',
+        name: 'Fairmont Royal York',
+        category: 'hotel',
+        categoryLabel: '5-star luxury hotel',
+        rating: 4.6,
+        reviews: 12450,
+        address: '100 Front St W, Toronto, ON M5J 1E3',
+        lat: 43.6457,
+        lng: -79.3814,
+        hours: 'Open 24 hours',
+        phone: '+1 416-368-2511',
+        website: 'thefairmontroyalyork.com',
+        photo: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=900&q=80',
+        description: 'Landmark 1929 railway hotel across from Union Station with Clockwork Champagne Lounge and indoor lap pool.'
+      },
+      {
+        id: 'one-hotel-toronto',
+        name: '1 Hotel Toronto',
+        category: 'hotel',
+        categoryLabel: 'Eco-luxury boutique hotel',
+        rating: 4.6,
+        reviews: 1420,
+        address: '550 Wellington St W, Toronto, ON M5V 2V4',
+        lat: 43.6425,
+        lng: -79.4017,
+        hours: 'Open 24 hours',
+        phone: '+1 416-640-7778',
+        website: '1hotels.com/toronto',
+        photo: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=900&q=80',
+        description: 'Nature-inspired sustainable hotel in King West featuring reclaimed timber interiors and Harriet’s Rooftop.'
+      },
+      {
+        id: 'trinity-bellwoods',
+        name: 'Trinity Bellwoods Park',
+        category: 'park',
+        categoryLabel: 'City park & recreation',
+        rating: 4.7,
+        reviews: 11890,
+        address: '790 Queen St W, Toronto, ON M6J 1G3',
+        lat: 43.6469,
+        lng: -79.4139,
+        hours: 'Open 24 hours',
+        phone: '+1 416-392-2489',
+        website: 'toronto.ca/parks',
+        photo: 'https://images.unsplash.com/photo-1501785888041-af3ef285b470?auto=format&fit=crop&w=900&q=80',
+        description: 'Beloved 36-acre West End park featuring mature silver maples, tennis courts, dog bowl, and farmers market.'
+      },
+      {
+        id: 'high-park',
+        name: 'High Park',
+        category: 'park',
+        categoryLabel: 'Urban park & cherry blossoms',
+        rating: 4.8,
+        reviews: 27400,
+        address: '1873 Bloor St W, Toronto, ON M6R 2Z3',
+        lat: 43.6465,
+        lng: -79.4637,
+        hours: 'Open 24 hours',
+        phone: '+1 416-338-0338',
+        website: 'highparktoronto.com',
+        photo: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=900&q=80',
+        description: 'Toronto’s largest public park with hiking trails, Grenadier Pond, zoo, and famous spring sakura blossoms.'
+      },
+      {
+        id: 'union-station',
+        name: 'Union Station',
+        category: 'transit',
+        categoryLabel: 'Intermodal rail & subway hub',
+        rating: 4.4,
+        reviews: 19300,
+        address: '65 Front St W, Toronto, ON M5J 1E6',
+        lat: 43.6452,
+        lng: -79.3806,
+        hours: 'Open • 5:30 AM – 1:30 AM',
+        phone: '+1 416-393-4636',
+        website: 'torontounion.ca',
+        photo: 'https://images.unsplash.com/photo-1474487548417-781cb71495f3?auto=format&fit=crop&w=900&q=80',
+        description: 'Beaux-Arts national historic transit hub connecting TTC Line 1, GO Transit, VIA Rail, and UP Express.'
+      },
+      {
+        id: 'bloor-yonge-station',
+        name: 'Bloor-Yonge Station',
+        category: 'transit',
+        categoryLabel: 'TTC Subway Interchange',
+        rating: 4.1,
+        reviews: 4320,
+        address: '20 Bloor St E, Toronto, ON M4W 3G7',
+        lat: 43.6709,
+        lng: -79.3857,
+        hours: 'Open • 5:45 AM – 1:45 AM',
+        phone: '+1 416-393-4636',
+        website: 'ttc.ca',
+        photo: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=900&q=80',
+        description: 'Busiest subway transfer station in Toronto serving Line 1 Yonge–University and Line 2 Bloor–Danforth.'
+      },
+      {
+        id: 'esso-spadina',
+        name: 'Esso & Circle K Downtown',
+        category: 'gas',
+        categoryLabel: 'Gas station & convenience',
+        rating: 4.0,
+        reviews: 410,
+        address: '430 Spadina Ave, Toronto, ON M5T 2G8',
+        lat: 43.6568,
+        lng: -79.4005,
+        hours: 'Open 24 hours',
+        phone: '+1 416-924-5512',
+        website: 'esso.ca',
+        photo: 'https://images.unsplash.com/photo-1527018601619-a508a2be00cd?auto=format&fit=crop&w=900&q=80',
+        description: '24-hour fuel station with car wash, EV fast charger, and convenience store.'
+      },
+      {
+        id: 'rom',
+        name: 'Royal Ontario Museum',
+        category: 'museum',
+        categoryLabel: 'Art, world culture & natural history',
+        rating: 4.7,
+        reviews: 36800,
+        address: '100 Queens Park, Toronto, ON M5S 2C6',
+        lat: 43.6677,
+        lng: -79.3948,
+        hours: 'Open • Closes 5:30 PM',
+        phone: '+1 416-586-8000',
+        website: 'rom.on.ca',
+        photo: 'https://images.unsplash.com/photo-1565060169194-19fabf63012c?auto=format&fit=crop&w=900&q=80',
+        description: 'Canada’s largest museum of world cultures and natural history featuring the Daniel Libeskind Crystal.'
+      },
+      {
+        id: 'ago',
+        name: 'Art Gallery of Ontario',
+        category: 'museum',
+        categoryLabel: 'Fine art museum',
+        rating: 4.7,
+        reviews: 24900,
+        address: '317 Dundas St W, Toronto, ON M5T 1G4',
+        lat: 43.6536,
+        lng: -79.3925,
+        hours: 'Open • Closes 5:30 PM',
+        phone: '+1 416-979-6648',
+        website: 'ago.ca',
+        photo: 'https://images.unsplash.com/photo-1518998053901-5348d3961a04?auto=format&fit=crop&w=900&q=80',
+        description: 'Major art museum redesigned by Frank Gehry housing 120,000+ works from Group of Seven to contemporary art.'
+      }
+    ];
+
+    const CATEGORY_META = {
+      restaurant: { color: '#EA4335', label: 'Restaurants' },
+      cafe: { color: '#9334E6', label: 'Coffee' },
+      hotel: { color: '#E52592', label: 'Hotels' },
+      park: { color: '#188038', label: 'Parks' },
+      transit: { color: '#1A73E8', label: 'Transit' },
+      gas: { color: '#F9AB00', label: 'Gas Stations' },
+      museum: { color: '#12B5CB', label: 'Museums' },
+      default: { color: '#EA4335', label: 'Place' }
+    };
+
+    // =========================================================================
+    // 2. INITIALIZE MAP & BASE LAYERS (100% KEYLESS ESRI ARCGIS TILES)
+    // =========================================================================
+    function initMap() {
+      state.map = L.map('map', {
+        center: DEFAULT_CENTER,
+        zoom: DEFAULT_ZOOM,
+        zoomControl: false,
+        attributionControl: true
+      });
+
+      // Define crisp, 100% keyless, Referer-friendly Esri ArcGIS map layers
+      state.baseLayers = {
+        default: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+          attribution: 'Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom',
+          maxZoom: 19
+        }),
+        satellite: L.layerGroup([
+          L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics',
+            maxZoom: 19
+          }),
+          L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Labels &copy; Esri',
+            maxZoom: 19,
+            opacity: 0.9
+          })
+        ]),
+        terrain: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+          attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ, TomTom, Intermap, iPC, USGS, FAO, NPS, NRCAN, GeoBase, Kadaster NL, Ordnance Survey',
+          maxZoom: 19
+        }),
+        dark: L.layerGroup([
+          L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
+            maxZoom: 16
+          }),
+          L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Labels &copy; Esri',
+            maxZoom: 16
+          })
+        ])
+      };
+
+      state.baseLayers.default.addTo(state.map);
+
+      // Optional Transit Overlay (Esri Transportation Reference + Toronto TTC Subway Lines 1 & 2)
+      const transportOverlay = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Transportation &copy; Esri',
+        opacity: 0.75,
+        maxZoom: 19
+      });
+
+      const ttcLine1 = L.polyline([
+        [43.7798, -79.4156], // Finch
+        [43.7443, -79.4066], // York Mills
+        [43.7061, -79.3983], // Eglinton
+        [43.6709, -79.3857], // Bloor-Yonge
+        [43.6452, -79.3807], // Union
+        [43.6548, -79.3883], // St Patrick
+        [43.6672, -79.3999], // St George
+        [43.6992, -79.4363], // Eglinton West
+        [43.7495, -79.4622], // Sheppard West
+        [43.7942, -79.5275]  // Vaughan Metropolitan Centre
+      ], { color: '#F9AB00', weight: 5, opacity: 0.9 });
+
+      const ttcLine2 = L.polyline([
+        [43.6372, -79.5361], // Kipling
+        [43.6516, -79.4760], // High Park
+        [43.6626, -79.4243], // Ossington
+        [43.6672, -79.3999], // St George
+        [43.6709, -79.3857], // Bloor-Yonge
+        [43.6788, -79.3447], // Pape
+        [43.6889, -79.3007], // Main Street
+        [43.7325, -79.2636]  // Kennedy
+      ], { color: '#188038', weight: 5, opacity: 0.9 });
+
+      state.transitLayer = L.layerGroup([transportOverlay, ttcLine1, ttcLine2]);
+
+      // Simulated Live Traffic Flow Corridors along major Toronto arteries
+      state.trafficLayer = L.layerGroup([
+        L.polyline([[43.6395, -79.4150], [43.6435, -79.3800], [43.6485, -79.3520]], { color: '#EA4335', weight: 5, opacity: 0.85 }), // Gardiner Expy heavy
+        L.polyline([[43.6455, -79.3785], [43.6710, -79.3858], [43.7060, -79.3982]], { color: '#F9AB00', weight: 4.5, opacity: 0.85 }), // Yonge St moderate
+        L.polyline([[43.6520, -79.4250], [43.6565, -79.3800], [43.6605, -79.3450]], { color: '#188038', weight: 4.5, opacity: 0.85 }), // Queen / Dundas smooth
+        L.polyline([[43.6620, -79.4350], [43.6709, -79.3857], [43.6765, -79.3520]], { color: '#188038', weight: 4.5, opacity: 0.85 })  // Bloor St smooth
+      ]);
+
+      // Layer groups for pins and routing polylines
+      state.markersLayer = L.layerGroup().addTo(state.map);
+      state.routeLayer = L.layerGroup().addTo(state.map);
+
+      // Render subtle initial landmarks so the map immediately feels alive
+      renderDefaultLandmarks();
+
+      // Click anywhere on map to inspect coordinates & reverse geocode
+      state.map.on('click', async (e) => {
+        closeSearchDropdown();
+        const { lat, lng } = e.latlng;
+        await handleMapClickReverseGeocode(lat, lng);
+      });
+    }
+
+    // =========================================================================
+    // 3. CUSTOM PIN CREATION & LANDMARK RENDERING
+    // =========================================================================
+    function createGooglePinIcon(color = '#EA4335', isSelected = false) {
+      const scale = isSelected ? 'scale(1.22)' : 'scale(1)';
+      return L.divIcon({
+        className: 'custom-google-pin',
+        iconSize: [32, 42],
+        iconAnchor: [16, 40],
+        popupAnchor: [0, -38],
+        html: `
+          <div class="google-pin-wrapper" style="transform: ${scale}; transform-origin: bottom center;">
+            <svg width="32" height="42" viewBox="0 0 32 42" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M16 0C7.16344 0 0 7.16344 0 16C0 27.25 16 42 16 42C16 42 32 27.25 32 16C32 7.16344 24.8366 0 16 0Z" fill="${color}"/>
+              <path d="M16 1C7.71573 1 1 7.71573 1 16C1 26.4 16 40.5 16 40.5C16 40.5 31 26.4 31 16C31 7.71573 24.2843 1 16 1Z" stroke="white" stroke-width="1.5" stroke-opacity="0.75"/>
+              <circle cx="16" cy="15.5" r="5.5" fill="white"/>
+            </svg>
+          </div>
+        `
+      });
+    }
+
+    function renderDefaultLandmarks() {
+      state.markersLayer.clearLayers();
+      // Show top 6 landmarks initially
+      const featured = CURATED_PLACES.slice(0, 6);
+      featured.forEach((place) => {
+        addPlaceMarker(place, false);
+      });
+    }
+
+    function addPlaceMarker(place, isSelected = false) {
+      const meta = CATEGORY_META[place.category] || CATEGORY_META.default;
+      const marker = L.marker([place.lat, place.lng], {
+        icon: createGooglePinIcon(meta.color, isSelected),
+        zIndexOffset: isSelected ? 1000 : 100
+      });
+
+      marker.bindTooltip(place.name, {
+        direction: 'top',
+        offset: [0, -36],
+        className: 'font-medium text-xs px-2 py-1 rounded-md shadow-sm'
+      });
+
+      marker.on('click', (e) => {
+        L.DomEvent.stopPropagation(e);
+        selectPlace(place);
+      });
+
+      marker.addTo(state.markersLayer);
+      return marker;
+    }
+
+    // =========================================================================
+    // 4. PLACE SELECTION, REVERSE GEOCODING & DRAWER VIEWS
+    // =========================================================================
+    function selectPlace(place, flyTo = true) {
+      state.selectedPlace = place;
+      state.drawerMode = 'place';
+
+      // Refresh markers so selected pin pops
+      state.markersLayer.clearLayers();
+      if (state.activeCategory) {
+        CURATED_PLACES.filter((p) => p.category === state.activeCategory).forEach((p) => {
+          addPlaceMarker(p, p.id === place.id);
+        });
+      } else {
+        addPlaceMarker(place, true);
+      }
+
+      if (flyTo) {
+        state.map.flyTo([place.lat, place.lng], Math.max(state.map.getZoom(), 15), {
+          duration: 0.75
+        });
+      }
+
+      renderPlaceDetailsDrawer(place);
+      openDrawer('Place Details');
+    }
+
+    async function handleMapClickReverseGeocode(lat, lng) {
+      const tempPlace = {
+        id: `pin-${lat.toFixed(5)}-${lng.toFixed(5)}`,
+        name: 'Dropped Pin',
+        category: 'default',
+        categoryLabel: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+        rating: null,
+        reviews: null,
+        address: 'Looking up address...',
+        lat,
+        lng,
+        hours: 'Public area',
+        phone: null,
+        website: null,
+        photo: 'https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?auto=format&fit=crop&w=900&q=80',
+        description: 'Custom dropped pin location. Click Directions to route here or save this spot.'
+      };
+
+      selectPlace(tempPlace, false);
+
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.display_name) {
+            const parts = data.display_name.split(',');
+            tempPlace.name = parts[0].trim() || 'Dropped Pin';
+            tempPlace.address = parts.slice(0, 4).join(',').trim();
+            if (state.selectedPlace && state.selectedPlace.id === tempPlace.id) {
+              renderPlaceDetailsDrawer(tempPlace);
+            }
+          }
+        }
+      } catch (err) {
+        tempPlace.address = `Coordinates: ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+        if (state.selectedPlace && state.selectedPlace.id === tempPlace.id) {
+          renderPlaceDetailsDrawer(tempPlace);
+        }
+      }
+    }
+
+    function renderPlaceDetailsDrawer(place) {
+      const isSaved = state.savedPlaces.some((p) => p.id === place.id);
+      const drawerBody = document.getElementById('drawer-body');
+
+      const starsHtml = place.rating
+        ? `
+          <div class="flex items-center gap-1.5 mt-1 text-sm">
+            <span class="font-semibold text-[#202124]">${place.rating.toFixed(1)}</span>
+            <div class="flex items-center text-[#F9AB00]">
+              ${'★'.repeat(Math.round(place.rating))}${'☆'.repeat(5 - Math.round(place.rating))}
+            </div>
+            <span class="text-[#70757a]">(${place.reviews.toLocaleString()})</span>
+          </div>
+        `
+        : '';
+
+      drawerBody.innerHTML = `
+        <div class="flex flex-col">
+          <!-- Hero Photo -->
+          <div class="relative h-52 w-full bg-gray-200 overflow-hidden">
+            <img
+              src="${place.photo}"
+              alt="${place.name}"
+              onerror="this.src='https://placehold.co/800x450/e8eaed/5f6368?text=${encodeURIComponent(place.name)}'"
+              class="w-full h-full object-cover"
+            />
+            <button
+              id="btn-place-streetview"
+              class="absolute bottom-3 right-3 bg-black/70 hover:bg-black/85 text-white text-xs font-medium px-3 py-1.5 rounded-full backdrop-blur-sm flex items-center gap-1.5 transition-colors"
+            >
+              <i data-lucide="compass" class="w-3.5 h-3.5 text-[#F9AB00]"></i>
+              <span>Street View</span>
+            </button>
+          </div>
+
+          <!-- Header Title & Category -->
+          <div class="p-5 border-b border-gray-100">
+            <h1 class="text-[22px] font-semibold text-[#202124] leading-tight">${place.name}</h1>
+            ${starsHtml}
+            <p class="text-sm text-[#70757a] mt-1">${place.categoryLabel}</p>
+          </div>
+
+          <!-- Google Action Buttons Row -->
+          <div class="grid grid-cols-4 gap-2 px-4 py-3.5 border-b border-gray-100">
+            <button id="btn-place-directions" class="flex flex-col items-center gap-1.5 group">
+              <div class="w-10 h-10 rounded-full bg-[#1A73E8] text-white flex items-center justify-center shadow-sm group-hover:bg-[#1557B0] transition-colors">
+                <i data-lucide="corner-up-right" class="w-5 h-5"></i>
+              </div>
+              <span class="text-xs font-medium text-[#1A73E8]">Directions</span>
+            </button>
+
+            <button id="btn-place-save" class="flex flex-col items-center gap-1.5 group">
+              <div class="w-10 h-10 rounded-full border ${isSaved ? 'bg-blue-50 border-[#1A73E8] text-[#1A73E8]' : 'border-gray-300 text-[#1A73E8] group-hover:bg-blue-50'} flex items-center justify-center transition-colors">
+                <i data-lucide="bookmark" class="w-5 h-5 ${isSaved ? 'fill-[#1A73E8]' : ''}"></i>
+              </div>
+              <span class="text-xs font-medium text-[#1A73E8]">${isSaved ? 'Saved' : 'Save'}</span>
+            </button>
+
+            <button id="btn-place-nearby" class="flex flex-col items-center gap-1.5 group">
+              <div class="w-10 h-10 rounded-full border border-gray-300 text-[#1A73E8] group-hover:bg-blue-50 flex items-center justify-center transition-colors">
+                <i data-lucide="radar" class="w-5 h-5"></i>
+              </div>
+              <span class="text-xs font-medium text-[#1A73E8]">Nearby</span>
+            </button>
+
+            <button id="btn-place-share" class="flex flex-col items-center gap-1.5 group">
+              <div class="w-10 h-10 rounded-full border border-gray-300 text-[#1A73E8] group-hover:bg-blue-50 flex items-center justify-center transition-colors">
+                <i data-lucide="share-2" class="w-5 h-5"></i>
+              </div>
+              <span class="text-xs font-medium text-[#1A73E8]">Share</span>
+            </button>
+          </div>
+
+          <!-- Description -->
+          <div class="px-5 py-3.5 border-b border-gray-100">
+            <p class="text-[13.5px] text-[#3c4043] leading-relaxed">${place.description}</p>
+          </div>
+
+          <!-- Info Rows -->
+          <div class="py-2 divide-y divide-gray-100 text-sm">
+            <div class="flex items-start gap-3.5 px-5 py-3 hover:bg-gray-50 transition-colors">
+              <i data-lucide="map-pin" class="w-5 h-5 text-[#1A73E8] flex-shrink-0 mt-0.5"></i>
+              <span class="text-[#3c4043]">${place.address}</span>
+            </div>
+
+            <div class="flex items-center gap-3.5 px-5 py-3 hover:bg-gray-50 transition-colors">
+              <i data-lucide="clock" class="w-5 h-5 text-[#1A73E8] flex-shrink-0"></i>
+              <span class="text-[#188038] font-medium">${place.hours}</span>
+            </div>
+
+            ${place.phone ? `
+              <div class="flex items-center gap-3.5 px-5 py-3 hover:bg-gray-50 transition-colors">
+                <i data-lucide="phone" class="w-5 h-5 text-[#1A73E8] flex-shrink-0"></i>
+                <span class="text-[#3c4043]">${place.phone}</span>
+              </div>
+            ` : ''}
+
+            ${place.website ? `
+              <div class="flex items-center gap-3.5 px-5 py-3 hover:bg-gray-50 transition-colors">
+                <i data-lucide="globe" class="w-5 h-5 text-[#1A73E8] flex-shrink-0"></i>
+                <span class="text-[#1A73E8] font-medium">${place.website}</span>
+              </div>
+            ` : ''}
+
+            <div class="flex items-center gap-3.5 px-5 py-3 hover:bg-gray-50 transition-colors">
+              <i data-lucide="navigation" class="w-5 h-5 text-[#1A73E8] flex-shrink-0"></i>
+              <span class="text-[#70757a] text-xs font-mono">${place.lat.toFixed(5)}, ${place.lng.toFixed(5)}</span>
+            </div>
+          </div>
+        </div>
+      `;
+
+      lucide.createIcons();
+
+      // Bind Drawer Action Listeners
+      document.getElementById('btn-place-directions').addEventListener('click', () => {
+        state.destCoords = [place.lat, place.lng];
+        state.destLabel = place.name;
+        openDirectionsDrawer();
+      });
+
+      document.getElementById('btn-place-save').addEventListener('click', () => {
+        toggleSavePlace(place);
+      });
+
+      document.getElementById('btn-place-nearby').addEventListener('click', () => {
+        state.map.flyTo([place.lat, place.lng], 15);
+        renderDefaultLandmarks();
+        showToast(`Showing places near ${place.name}`);
+      });
+
+      document.getElementById('btn-place-share').addEventListener('click', () => {
+        const shareText = `${place.name} — ${place.address} (${place.lat.toFixed(5)}, ${place.lng.toFixed(5)})`;
+        copyToClipboard(shareText);
+        showToast('Place link & coordinates copied to clipboard');
+      });
+
+      document.getElementById('btn-place-streetview').addEventListener('click', () => {
+        openStreetView(place);
+      });
+    }
+
+    // =========================================================================
+    // 5. TURN-BY-TURN DIRECTIONS & OSRM LIVE ROUTING
+    // =========================================================================
+    function openDirectionsDrawer() {
+      state.drawerMode = 'directions';
+      openDrawer('Directions');
+      renderDirectionsDrawer();
+      if (state.originCoords && state.destCoords) {
+        calculateAndDrawRoute();
+      }
+    }
+
+    function renderDirectionsDrawer() {
+      const drawerBody = document.getElementById('drawer-body');
+      const modes = [
+        { id: 'driving', icon: 'car', label: 'Drive' },
+        { id: 'transit', icon: 'train-front', label: 'Transit' },
+        { id: 'walking', icon: 'footprints', label: 'Walk' },
+        { id: 'cycling', icon: 'bike', label: 'Bike' }
+      ];
+
+      drawerBody.innerHTML = `
+        <div class="flex flex-col h-full">
+          <!-- Travel Mode Tabs -->
+          <div class="flex items-center justify-around px-4 pt-2 pb-3 border-b border-gray-100 bg-white">
+            ${modes.map((m) => {
+              const active = state.travelMode === m.id;
+              return `
+                <button
+                  data-mode="${m.id}"
+                  class="travel-mode-btn flex flex-col items-center gap-1 px-3 py-1.5 rounded-full transition-colors ${active ? 'bg-blue-50 text-[#1A73E8]' : 'text-[#5f6368] hover:bg-gray-100'}"
+                >
+                  <i data-lucide="${m.icon}" class="w-5 h-5"></i>
+                  <span class="text-[11px] font-medium">${m.label}</span>
+                </button>
+              `;
+            }).join('')}
+          </div>
+
+          <!-- Origin & Destination Inputs -->
+          <div class="p-4 bg-gray-50/70 border-b border-gray-200 flex items-center gap-3">
+            <div class="flex flex-col items-center gap-1 text-[#5f6368]">
+              <div class="w-3 h-3 rounded-full border-2 border-[#5f6368] bg-white"></div>
+              <div class="w-0.5 h-6 bg-gray-300"></div>
+              <i data-lucide="map-pin" class="w-4 h-4 text-[#EA4335]"></i>
+            </div>
+
+            <div class="flex-1 flex flex-col gap-2">
+              <input
+                id="dir-origin-input"
+                type="text"
+                value="${state.originLabel}"
+                placeholder="Choose starting point..."
+                class="w-full bg-white border border-gray-300 focus:border-[#1A73E8] rounded-lg px-3 py-2 text-sm text-[#202124] outline-none"
+              />
+              <input
+                id="dir-dest-input"
+                type="text"
+                value="${state.destLabel}"
+                placeholder="Choose destination..."
+                class="w-full bg-white border border-gray-300 focus:border-[#1A73E8] rounded-lg px-3 py-2 text-sm text-[#202124] outline-none"
+              />
+            </div>
+
+            <button
+              id="btn-swap-route"
+              title="Swap starting point and destination"
+              class="p-2 rounded-full hover:bg-gray-200/70 text-[#5f6368] transition-colors"
+            >
+              <i data-lucide="arrow-up-down" class="w-4 h-4"></i>
+            </button>
+          </div>
+
+          <!-- Quick Destination Suggestions if Empty -->
+          <div id="route-results-container" class="flex-1 overflow-y-auto thin-scrollbar p-4">
+            ${!state.destCoords ? `
+              <p class="text-xs font-semibold uppercase tracking-wider text-[#5f6368] mb-2.5">Popular Destinations</p>
+              <div class="space-y-1.5">
+                ${CURATED_PLACES.slice(0, 5).map((p) => `
+                  <button
+                    data-quick-dest="${p.id}"
+                    class="quick-dest-btn w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-gray-100 text-left transition-colors"
+                  >
+                    <div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-[#5f6368]">
+                      <i data-lucide="map-pin" class="w-4 h-4"></i>
+                    </div>
+                    <div class="min-w-0 flex-1">
+                      <p class="text-sm font-medium text-[#202124] truncate">${p.name}</p>
+                      <p class="text-xs text-[#70757a] truncate">${p.address}</p>
+                    </div>
+                  </button>
+                `).join('')}
+              </div>
+            ` : `
+              <div class="flex items-center justify-center py-8 text-sm text-[#5f6368] gap-2">
+                <i data-lucide="loader-2" class="w-4 h-4 animate-spin text-[#1A73E8]"></i>
+                <span>Calculating fastest route...</span>
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+
+      lucide.createIcons();
+
+      // Travel Mode Switch
+      document.querySelectorAll('.travel-mode-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          state.travelMode = btn.dataset.mode;
+          renderDirectionsDrawer();
+          if (state.originCoords && state.destCoords) {
+            calculateAndDrawRoute();
+          }
+        });
+      });
+
+      // Swap Origin & Destination
+      document.getElementById('btn-swap-route').addEventListener('click', () => {
+        const tmpCoords = state.originCoords;
+        const tmpLabel = state.originLabel;
+        state.originCoords = state.destCoords;
+        state.originLabel = state.destLabel;
+        state.destCoords = tmpCoords;
+        state.destLabel = tmpLabel;
+        renderDirectionsDrawer();
+        if (state.originCoords && state.destCoords) {
+          calculateAndDrawRoute();
+        }
+      });
+
+      // Quick Destinations
+      document.querySelectorAll('.quick-dest-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const found = CURATED_PLACES.find((p) => p.id === btn.dataset.quickDest);
+          if (found) {
+            state.destCoords = [found.lat, found.lng];
+            state.destLabel = found.name;
+            renderDirectionsDrawer();
+            calculateAndDrawRoute();
+          }
+        });
+      });
+
+      // Enter key on inputs triggers geocode & route
+      const originInput = document.getElementById('dir-origin-input');
+      const destInput = document.getElementById('dir-dest-input');
+
+      originInput.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter' && originInput.value.trim()) {
+          const loc = await resolveTextLocation(originInput.value.trim());
+          if (loc) {
+            state.originCoords = [loc.lat, loc.lng];
+            state.originLabel = loc.name;
+            if (state.destCoords) calculateAndDrawRoute();
+          } else {
+            showToast('Could not find starting location');
+          }
+        }
+      });
+
+      destInput.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter' && destInput.value.trim()) {
+          const loc = await resolveTextLocation(destInput.value.trim());
+          if (loc) {
+            state.destCoords = [loc.lat, loc.lng];
+            state.destLabel = loc.name;
+            if (state.originCoords) calculateAndDrawRoute();
+          } else {
+            showToast('Could not find destination');
+          }
+        }
+      });
+    }
+
+    async function resolveTextLocation(query) {
+      const lower = query.toLowerCase();
+      const localMatch = CURATED_PLACES.find((p) => p.name.toLowerCase().includes(lower));
+      if (localMatch) return { lat: localMatch.lat, lng: localMatch.lng, name: localMatch.name };
+
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
+        const data = await res.json();
+        if (data && data.length > 0) {
+          return {
+            lat: parseFloat(data[0].lat),
+            lng: parseFloat(data[0].lon),
+            name: data[0].display_name.split(',')[0]
+          };
+        }
+      } catch (e) {}
+      return null;
+    }
+
+    async function calculateAndDrawRoute() {
+      const container = document.getElementById('route-results-container');
+      if (!state.originCoords || !state.destCoords) return;
+
+      const osrmProfile = state.travelMode === 'walking' ? 'foot' : state.travelMode === 'cycling' ? 'bike' : 'driving';
+      const [oLat, oLng] = state.originCoords;
+      const [dLat, dLng] = state.destCoords;
+
+      try {
+        const url = `https://router.project-osrm.org/route/v1/${osrmProfile}/${oLng},${oLat};${dLng},${dLat}?overview=full&geometries=geojson&steps=true`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (data && data.routes && data.routes.length > 0) {
+          const route = data.routes[0];
+          const coords = route.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+
+          // Adjust duration slightly for realistic transit mode simulation
+          let durationSec = route.duration;
+          if (state.travelMode === 'transit') durationSec *= 1.35;
+
+          const mins = Math.max(1, Math.round(durationSec / 60));
+          const km = (route.distance / 1000).toFixed(1);
+
+          drawRoutePolyline(coords);
+
+          const steps = route.legs[0].steps || [];
+          container.innerHTML = `
+            <div class="bg-blue-50/70 border border-blue-100 rounded-2xl p-4 mb-4">
+              <div class="flex items-baseline justify-between">
+                <span class="text-xl font-bold text-[#188038]">${mins} min</span>
+                <span class="text-sm font-medium text-[#5f6368]">${km} km</span>
+              </div>
+              <p class="text-xs text-[#5f6368] mt-1">Fastest route now via ${steps[0]?.name || 'main streets'}</p>
+            </div>
+
+            <div class="space-y-3">
+              ${steps.slice(0, 12).map((step, idx) => {
+                const stepDist = step.distance > 1000 ? `${(step.distance / 1000).toFixed(1)} km` : `${Math.round(step.distance)} m`;
+                const instruction = formatOsrmStep(step, idx === steps.length - 1);
+                return `
+                  <div class="flex items-start gap-3 pb-3 border-b border-gray-100 last:border-none">
+                    <div class="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-[#1A73E8] flex-shrink-0 mt-0.5">
+                      <i data-lucide="arrow-up-right" class="w-4 h-4"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm text-[#202124]">${instruction}</p>
+                      <p class="text-xs text-[#70757a] mt-0.5">${stepDist}</p>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `;
+          lucide.createIcons();
+          return;
+        }
+      } catch (err) {
+        // Fallback straight-line route if OSRM is unreachable
+      }
+
+      // Fallback route rendering
+      const fallbackCoords = [[oLat, oLng], [dLat, dLng]];
+      drawRoutePolyline(fallbackCoords);
+      const approxKm = (state.map.distance([oLat, oLng], [dLat, dLng]) / 1000).toFixed(1);
+      const approxMins = Math.max(2, Math.round(approxKm * (state.travelMode === 'walking' ? 12 : 3)));
+
+      container.innerHTML = `
+        <div class="bg-blue-50/70 border border-blue-100 rounded-2xl p-4">
+          <div class="flex items-baseline justify-between">
+            <span class="text-xl font-bold text-[#188038]">${approxMins} min</span>
+            <span class="text-sm font-medium text-[#5f6368]">${approxKm} km</span>
+          </div>
+          <p class="text-xs text-[#5f6368] mt-1">Direct route from ${state.originLabel} to ${state.destLabel}</p>
+        </div>
+      `;
+    }
+
+    function formatOsrmStep(step, isLast) {
+      if (isLast) return `Arrive at <strong>${state.destLabel}</strong>`;
+      const mod = step.maneuver?.modifier ? ` ${step.maneuver.modifier}` : '';
+      const type = step.maneuver?.type || 'continue';
+      const road = step.name ? ` onto <strong>${step.name}</strong>` : '';
+      const action = type === 'depart' ? 'Head' : type === 'turn' ? 'Turn' : 'Continue';
+      return `${action}${mod}${road}`;
+    }
+
+    function drawRoutePolyline(coords) {
+      state.routeLayer.clearLayers();
+      state.markersLayer.clearLayers();
+
+      // Outer border + inner Google Blue route path
+      const outer = L.polyline(coords, { color: '#1557B0', weight: 8, opacity: 0.85, lineCap: 'round' });
+      const inner = L.polyline(coords, { color: '#4285F4', weight: 5, opacity: 1, lineCap: 'round' });
+
+      // Origin circle & destination pin
+      const startDot = L.circleMarker(coords[0], {
+        radius: 7,
+        color: '#202124',
+        weight: 2.5,
+        fillColor: '#ffffff',
+        fillOpacity: 1
+      });
+      const endPin = L.marker(coords[coords.length - 1], {
+        icon: createGooglePinIcon('#EA4335', true)
+      });
+
+      state.routeLayer.addLayer(outer);
+      state.routeLayer.addLayer(inner);
+      state.routeLayer.addLayer(startDot);
+      state.routeLayer.addLayer(endPin);
+
+      state.map.fitBounds(outer.getBounds(), {
+        paddingTopLeft: [window.innerWidth > 640 ? 430 : 40, 90],
+        paddingBottomRight: [50, 60]
+      });
+    }
+
+    // =========================================================================
+    // 6. SAVED PLACES & BOOKMARKING
+    // =========================================================================
+    function toggleSavePlace(place) {
+      const idx = state.savedPlaces.findIndex((p) => p.id === place.id);
+      if (idx > -1) {
+        state.savedPlaces.splice(idx, 1);
+        showToast(`Removed ${place.name} from Saved Places`);
+      } else {
+        state.savedPlaces.unshift(place);
+        showToast(`Saved ${place.name} to Your Places`);
+      }
+      localStorage.setItem('gmaps_clone_saved', JSON.stringify(state.savedPlaces));
+
+      if (state.drawerMode === 'place' && state.selectedPlace?.id === place.id) {
+        renderPlaceDetailsDrawer(place);
+      } else if (state.drawerMode === 'saved') {
+        renderSavedPlacesDrawer();
+      }
+    }
+
+    function openSavedPlacesDrawer() {
+      state.drawerMode = 'saved';
+      openDrawer('Saved Places');
+      renderSavedPlacesDrawer();
+    }
+
+    function renderSavedPlacesDrawer() {
+      const drawerBody = document.getElementById('drawer-body');
+      drawerBody.innerHTML = `
+        <div class="p-5">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h2 class="text-lg font-semibold text-[#202124]">Your Places</h2>
+              <p class="text-xs text-[#70757a]">${state.savedPlaces.length} saved location${state.savedPlaces.length === 1 ? '' : 's'}</p>
+            </div>
+            <div class="w-9 h-9 rounded-full bg-blue-50 text-[#1A73E8] flex items-center justify-center">
+              <i data-lucide="bookmark" class="w-5 h-5"></i>
+            </div>
+          </div>
+
+          ${state.savedPlaces.length === 0 ? `
+            <div class="text-center py-12 px-4 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+              <i data-lucide="map-pin" class="w-8 h-8 text-[#70757a] mx-auto mb-2"></i>
+              <p class="text-sm font-medium text-[#3c4043]">No saved places yet</p>
+              <p class="text-xs text-[#70757a] mt-1">Click any pin or landmark on the map and tap "Save" to bookmark it here.</p>
+            </div>
+          ` : `
+            <div class="space-y-2.5">
+              ${state.savedPlaces.map((p) => `
+                <div class="flex items-center gap-3 p-3 rounded-2xl border border-gray-100 hover:border-gray-200 hover:bg-gray-50 transition-all">
+                  <img
+                    src="${p.photo}"
+                    onerror="this.src='https://placehold.co/120x120/e8eaed/5f6368?text=Pin'"
+                    class="w-14 h-14 rounded-xl object-cover flex-shrink-0"
+                  />
+                  <button data-open-saved="${p.id}" class="open-saved-btn flex-1 min-w-0 text-left">
+                    <p class="text-sm font-semibold text-[#202124] truncate">${p.name}</p>
+                    <p class="text-xs text-[#70757a] truncate mt-0.5">${p.address}</p>
+                  </button>
+                  <button data-remove-saved="${p.id}" title="Remove" class="remove-saved-btn p-2 rounded-full hover:bg-red-50 text-[#70757a] hover:text-[#EA4335] transition-colors">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                  </button>
+                </div>
+              `).join('')}
+            </div>
+          `}
+        </div>
+      `;
+
+      lucide.createIcons();
+
+      document.querySelectorAll('.open-saved-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const found = state.savedPlaces.find((p) => p.id === btn.dataset.openSaved);
+          if (found) selectPlace(found);
+        });
+      });
+
+      document.querySelectorAll('.remove-saved-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const found = state.savedPlaces.find((p) => p.id === btn.dataset.removeSaved);
+          if (found) toggleSavePlace(found);
+        });
+      });
+    }
+
+    // =========================================================================
+    // 7. SEARCH BAR AUTOCOMPLETE & CATEGORY DISCOVERY CHIPS
+    // =========================================================================
+    let searchTimeout = null;
+
+    function initSearchAndChips() {
+      const searchInput = document.getElementById('search-input');
+      const clearBtn = document.getElementById('btn-clear-search');
+      const submitBtn = document.getElementById('btn-search-submit');
+
+      searchInput.addEventListener('input', () => {
+        const val = searchInput.value.trim();
+        clearBtn.classList.toggle('hidden', val.length === 0);
+
+        clearTimeout(searchTimeout);
+        if (!val) {
+          closeSearchDropdown();
+          return;
+        }
+
+        searchTimeout = setTimeout(() => performAutocompleteSearch(val), 240);
+      });
+
+      searchInput.addEventListener('focus', () => {
+        const val = searchInput.value.trim();
+        if (val) {
+          performAutocompleteSearch(val);
+        } else {
+          renderDropdownResults(CURATED_PLACES.slice(0, 5), []);
+        }
+      });
+
+      searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          const val = searchInput.value.trim();
+          if (val) performAutocompleteSearch(val, true);
+        }
+      });
+
+      submitBtn.addEventListener('click', () => {
+        const val = searchInput.value.trim();
+        if (val) performAutocompleteSearch(val, true);
+      });
+
+      clearBtn.addEventListener('click', () => {
+        searchInput.value = '';
+        clearBtn.classList.add('hidden');
+        closeSearchDropdown();
+        state.routeLayer.clearLayers();
+        state.activeCategory = null;
+        updateCategoryChipStyles();
+        renderDefaultLandmarks();
+      });
+
+      // Category Filter Chips
+      document.querySelectorAll('.category-chip').forEach((chip) => {
+        chip.addEventListener('click', () => {
+          const cat = chip.dataset.category;
+          if (state.activeCategory === cat) {
+            state.activeCategory = null;
+            updateCategoryChipStyles();
+            renderDefaultLandmarks();
+            showToast('Cleared category filter');
+          } else {
+            state.activeCategory = cat;
+            updateCategoryChipStyles();
+            filterByCategory(cat);
+          }
+        });
+      });
+    }
+
+    async function performAutocompleteSearch(query, autoSelectFirst = false) {
+      const lower = query.toLowerCase();
+      const localMatches = CURATED_PLACES.filter(
+        (p) =>
+          p.name.toLowerCase().includes(lower) ||
+          p.categoryLabel.toLowerCase().includes(lower) ||
+          p.address.toLowerCase().includes(lower)
+      );
+
+      let remoteMatches = [];
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          remoteMatches = data.map((item) => {
+            const parts = item.display_name.split(',');
+            return {
+              id: `osm-${item.place_id}`,
+              name: parts[0].trim(),
+              category: 'default',
+              categoryLabel: item.type ? item.type.replace(/_/g, ' ') : 'Location',
+              rating: null,
+              reviews: null,
+              address: parts.slice(0, 4).join(',').trim(),
+              lat: parseFloat(item.lat),
+              lng: parseFloat(item.lon),
+              hours: 'Open',
+              phone: null,
+              website: null,
+              photo: 'https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?auto=format&fit=crop&w=900&q=80',
+              description: item.display_name
+            };
+          });
+        }
+      } catch (e) {}
+
+      const combined = [...localMatches, ...remoteMatches];
+      if (autoSelectFirst && combined.length > 0) {
+        closeSearchDropdown();
+        selectPlace(combined[0]);
+        return;
+      }
+
+      renderDropdownResults(localMatches, remoteMatches);
+    }
+
+    function renderDropdownResults(localPlaces, remotePlaces) {
+      const dropdown = document.getElementById('search-dropdown');
+      const all = [...localPlaces, ...remotePlaces].slice(0, 7);
+
+      if (all.length === 0) {
+        dropdown.innerHTML = `<div class="px-4 py-3.5 text-sm text-[#70757a]">No matching locations found</div>`;
+        dropdown.classList.remove('hidden');
+        return;
+      }
+
+      dropdown.innerHTML = all
+        .map(
+          (p, idx) => `
+          <button
+            data-result-idx="${idx}"
+            class="search-result-item w-full flex items-center gap-3.5 px-4 py-3 hover:bg-gray-100 text-left border-b border-gray-50 last:border-none transition-colors"
+          >
+            <div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-[#5f6368] flex-shrink-0">
+              <i data-lucide="map-pin" class="w-4 h-4"></i>
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium text-[#202124] truncate">${p.name}</p>
+              <p class="text-xs text-[#70757a] truncate">${p.address}</p>
+            </div>
+          </button>
+        `
+        )
+        .join('');
+
+      dropdown.classList.remove('hidden');
+      lucide.createIcons();
+
+      dropdown.querySelectorAll('.search-result-item').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const picked = all[parseInt(btn.dataset.resultIdx, 10)];
+          document.getElementById('search-input').value = picked.name;
+          document.getElementById('btn-clear-search').classList.remove('hidden');
+          closeSearchDropdown();
+          selectPlace(picked);
+        });
+      });
+    }
+
+    function closeSearchDropdown() {
+      document.getElementById('search-dropdown').classList.add('hidden');
+    }
+
+    function filterByCategory(category) {
+      const matches = CURATED_PLACES.filter((p) => p.category === category);
+      state.markersLayer.clearLayers();
+      state.routeLayer.clearLayers();
+
+      const bounds = [];
+      matches.forEach((p) => {
+        addPlaceMarker(p, false);
+        bounds.push([p.lat, p.lng]);
+      });
+
+      if (bounds.length > 0) {
+        state.map.fitBounds(bounds, { padding: [90, 90], maxZoom: 15 });
+      }
+
+      const meta = CATEGORY_META[category];
+      showToast(`Showing ${matches.length} ${meta.label} nearby`);
+    }
+
+    function updateCategoryChipStyles() {
+      document.querySelectorAll('.category-chip').forEach((chip) => {
+        const isActive = chip.dataset.category === state.activeCategory;
+        if (isActive) {
+          chip.classList.add('bg-[#1A73E8]', 'text-white', 'border-[#1A73E8]');
+          chip.classList.remove('bg-white', 'text-[#3c4043]');
+        } else {
+          chip.classList.remove('bg-[#1A73E8]', 'text-white', 'border-[#1A73E8]');
+          chip.classList.add('bg-white', 'text-[#3c4043]');
+        }
+      });
+    }
+
+    // =========================================================================
+    // 8. DRAWER HELPERS, LAYERS SWITCHER, GEOLOCATION & STREET VIEW
+    // =========================================================================
+    function openDrawer(mobileTitle = 'Details') {
+      const drawer = document.getElementById('side-drawer');
+      document.getElementById('mobile-drawer-title').textContent = mobileTitle;
+      drawer.classList.remove('-translate-x-full');
+    }
+
+    function closeDrawer() {
+      const drawer = document.getElementById('side-drawer');
+      drawer.classList.add('-translate-x-full');
+      state.drawerMode = null;
+    }
+
+    function switchBaseLayer(layerKey) {
+      if (state.activeBaseLayer === layerKey) return;
+      state.map.removeLayer(state.baseLayers[state.activeBaseLayer]);
+      state.baseLayers[layerKey].addTo(state.map);
+      state.activeBaseLayer = layerKey;
+
+      document.querySelectorAll('.layer-option').forEach((btn) => {
+        const active = btn.dataset.layer === layerKey;
+        const box = btn.querySelector('div');
+        const label = btn.querySelector('span');
+        if (active) {
+          box.classList.add('border-[#1A73E8]');
+          box.classList.remove('border-transparent');
+          label.classList.add('text-[#1A73E8]');
+          label.classList.remove('text-[#5f6368]');
+        } else {
+          box.classList.remove('border-[#1A73E8]');
+          box.classList.add('border-transparent');
+          label.classList.remove('text-[#1A73E8]');
+          label.classList.add('text-[#5f6368]');
+        }
+      });
+    }
+
+    function locateUser() {
+      if (!navigator.geolocation) {
+        showToast('Geolocation is not supported by your browser');
+        return;
+      }
+      showToast('Locating your position...');
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const { latitude, longitude } = pos.coords;
+          state.originCoords = [latitude, longitude];
+          state.originLabel = 'Your Location';
+
+          if (state.userMarker) state.map.removeLayer(state.userMarker);
+          state.userMarker = L.marker([latitude, longitude], {
+            icon: L.divIcon({
+              className: 'user-location-dot',
+              iconSize: [24, 24],
+              iconAnchor: [12, 12],
+              html: `
+                <div class="relative w-6 h-6 flex items-center justify-center">
+                  <div class="user-pulse-ring absolute inset-0 rounded-full bg-[#1A73E8]"></div>
+                  <div class="relative w-4 h-4 rounded-full bg-[#1A73E8] border-2 border-white shadow-md"></div>
+                </div>
+              `
+            })
+          }).addTo(state.map);
+
+          state.map.flyTo([latitude, longitude], 15, { duration: 0.85 });
+          showToast('Centered on your location');
+        },
+        () => {
+          // Graceful fallback to Downtown Toronto center if permission denied in sandbox
+          state.map.flyTo(DEFAULT_CENTER, DEFAULT_ZOOM, { duration: 0.8 });
+          showToast('Centered on Downtown Toronto');
+        },
+        { enableHighAccuracy: true, timeout: 6000 }
+      );
+    }
+
+    function openStreetView(place = null) {
+      const modal = document.getElementById('streetview-modal');
+      const titleEl = document.getElementById('sv-title');
+      const coordsEl = document.getElementById('sv-coords');
+      const panoEl = document.getElementById('sv-panorama');
+
+      const center = place ? { lat: place.lat, lng: place.lng } : state.map.getCenter();
+      titleEl.textContent = place ? `Street View — ${place.name}` : 'Street View — Toronto Exploration';
+      coordsEl.textContent = `${center.lat.toFixed(4)}° N, ${Math.abs(center.lng).toFixed(4)}° W • Drag horizontally to pan 360°`;
+
+      if (place && place.photo) {
+        panoEl.style.backgroundImage = `url('${place.photo}')`;
+      }
+
+      modal.classList.remove('hidden');
+    }
+
+    function initStreetViewDrag() {
+      const panoEl = document.getElementById('sv-panorama');
+
+      const startDrag = (clientX) => {
+        state.svDragging = true;
+        state.svStartX = clientX;
+      };
+
+      const moveDrag = (clientX) => {
+        if (!state.svDragging) return;
+        const delta = (clientX - state.svStartX) * 0.12;
+        state.svStartX = clientX;
+        state.svPanX = (state.svPanX - delta + 100) % 100;
+        panoEl.style.backgroundPosition = `${state.svPanX}% 50%`;
+      };
+
+      const endDrag = () => {
+        state.svDragging = false;
+      };
+
+      panoEl.addEventListener('mousedown', (e) => startDrag(e.clientX));
+      window.addEventListener('mousemove', (e) => moveDrag(e.clientX));
+      window.addEventListener('mouseup', endDrag);
+
+      panoEl.addEventListener('touchstart', (e) => startDrag(e.touches[0].clientX), { passive: true });
+      panoEl.addEventListener('touchmove', (e) => moveDrag(e.touches[0].clientX), { passive: true });
+      panoEl.addEventListener('touchend', endDrag);
+    }
+
+    let toastTimer = null;
+    function showToast(msg) {
+      const banner = document.getElementById('toast-banner');
+      const text = document.getElementById('toast-message');
+      text.textContent = msg;
+      banner.classList.remove('opacity-0', 'translate-y-3');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        banner.classList.add('opacity-0', 'translate-y-3');
+      }, 2800);
+    }
+
+    function copyToClipboard(text) {
+      const el = document.createElement('textarea');
+      el.value = text;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+    }
+
+    // =========================================================================
+    // 9. BOOTSTRAP ALL EVENT LISTENERS ON LOAD
+    // =========================================================================
+    window.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      initMap();
+      initSearchAndChips();
+      initStreetViewDrag();
+
+      // Top Menu & Directions Buttons
+      document.getElementById('btn-menu').addEventListener('click', () => {
+        if (state.drawerMode === 'saved') {
+          closeDrawer();
+        } else {
+          openSavedPlacesDrawer();
+        }
+      });
+
+      document.getElementById('btn-open-directions').addEventListener('click', () => {
+        if (state.selectedPlace) {
+          state.destCoords = [state.selectedPlace.lat, state.selectedPlace.lng];
+          state.destLabel = state.selectedPlace.name;
+        }
+        openDirectionsDrawer();
+      });
+
+      // Drawer Close Buttons
+      document.getElementById('btn-close-drawer').addEventListener('click', closeDrawer);
+      document.getElementById('btn-close-drawer-mobile').addEventListener('click', closeDrawer);
+
+      // Layers Popover Controls
+      const layersPopover = document.getElementById('layers-popover');
+      document.getElementById('btn-toggle-layers').addEventListener('click', () => {
+        layersPopover.classList.toggle('hidden');
+      });
+      document.getElementById('btn-close-layers').addEventListener('click', () => {
+        layersPopover.classList.add('hidden');
+      });
+
+      document.querySelectorAll('.layer-option').forEach((btn) => {
+        btn.addEventListener('click', () => switchBaseLayer(btn.dataset.layer));
+      });
+
+      // Transit & Traffic Overlays
+      const transitBtn = document.getElementById('toggle-transit-overlay');
+      transitBtn.addEventListener('click', () => {
+        state.transitActive = !state.transitActive;
+        if (state.transitActive) {
+          state.transitLayer.addTo(state.map);
+          transitBtn.classList.add('bg-blue-50', 'border-[#1A73E8]', 'text-[#1A73E8]');
+          showToast('Transit lines enabled');
+        } else {
+          state.map.removeLayer(state.transitLayer);
+          transitBtn.classList.remove('bg-blue-50', 'border-[#1A73E8]', 'text-[#1A73E8]');
+          showToast('Transit lines hidden');
+        }
+      });
+
+      const trafficBtn = document.getElementById('toggle-traffic-overlay');
+      trafficBtn.addEventListener('click', () => {
+        state.trafficActive = !state.trafficActive;
+        if (state.trafficActive) {
+          state.trafficLayer.addTo(state.map);
+          trafficBtn.classList.add('bg-emerald-50', 'border-[#188038]', 'text-[#188038]');
+          showToast('Live traffic layer enabled');
+        } else {
+          state.map.removeLayer(state.trafficLayer);
+          trafficBtn.classList.remove('bg-emerald-50', 'border-[#188038]', 'text-[#188038]');
+          showToast('Live traffic layer hidden');
+        }
+      });
+
+      // Bottom-Right Map Navigation Controls
+      document.getElementById('btn-zoom-in').addEventListener('click', () => state.map.zoomIn());
+      document.getElementById('btn-zoom-out').addEventListener('click', () => state.map.zoomOut());
+      document.getElementById('btn-locate-me').addEventListener('click', locateUser);
+      document.getElementById('btn-street-view').addEventListener('click', () => openStreetView(state.selectedPlace));
+      document.getElementById('btn-close-streetview').addEventListener('click', () => {
+        document.getElementById('streetview-modal').classList.add('hidden');
+      });
+    });
+  </script>
+</body>
+</html>
