@@ -1,1198 +1,825 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Google Maps Clone</title>
-
-  <!-- Google Font: Inter -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
-
+  <!-- FontAwesome for Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <!-- Leaflet CSS & JS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
-
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Three.js for 3D Walk Environment & BufferGeometryUtils -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.128.0/examples/js/utils/BufferGeometryUtils.js"></script>
   <style>
-    * {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      box-sizing: border-box;
-    }
-
-    html, body {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      background-color: #e5e3df;
-    }
-
-    #map {
-      width: 100%;
-      height: 100%;
-      z-index: 1;
-    }
-
-    /* Hide default Leaflet zoom controls (we build custom bottom-right Google-style controls) */
-    .leaflet-control-zoom {
-      display: none !important;
-    }
-
-    .leaflet-control-attribution {
-      font-size: 10px !important;
-      background: rgba(255, 255, 255, 0.78) !important;
-      backdrop-filter: blur(4px);
-      padding: 2px 6px !important;
-      border-top-left-radius: 6px;
-      color: #5f6368 !important;
-    }
-
-    /* Custom Scrollbars */
-    .no-scrollbar::-webkit-scrollbar {
-      display: none;
-    }
-    .no-scrollbar {
-      -ms-overflow-style: none;
-      scrollbar-width: none;
-    }
-
-    .thin-scrollbar::-webkit-scrollbar {
-      width: 6px;
-    }
-    .thin-scrollbar::-webkit-scrollbar-track {
-      background: transparent;
-    }
-    .thin-scrollbar::-webkit-scrollbar-thumb {
-      background: #dadce0;
-      border-radius: 9999px;
-    }
-    .thin-scrollbar::-webkit-scrollbar-thumb:hover {
-      background: #bdc1c6;
-    }
-
-    /* Google Pin Drop Animation */
-    @keyframes pinDrop {
-      0% {
-        transform: translateY(-24px) scale(0.8);
-        opacity: 0;
-      }
-      70% {
-        transform: translateY(3px) scale(1.05);
-        opacity: 1;
-      }
-      100% {
-        transform: translateY(0) scale(1);
-        opacity: 1;
-      }
-    }
-
-    .google-pin-wrapper {
-      animation: pinDrop 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-    }
-
-    /* User Pulse Dot */
-    @keyframes userPulse {
-      0% {
-        transform: scale(0.85);
-        opacity: 0.75;
-      }
-      70% {
-        transform: scale(2.2);
-        opacity: 0;
-      }
-      100% {
-        transform: scale(2.2);
-        opacity: 0;
-      }
-    }
-
-    .user-pulse-ring {
-      animation: userPulse 2s infinite ease-out;
-    }
-
-    /* Street View Panoramic Simulation */
-    .streetview-panorama {
-      background-size: 200% 100%;
-      transition: background-position 0.1s linear;
-      cursor: grab;
-    }
-    .streetview-panorama:active {
-      cursor: grabbing;
-    }
+    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+    body { font-family: 'Roboto', sans-serif; }
+    #map { height: 100vh; width: 100vw; z-index: 1; }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
   </style>
 </head>
-<body class="relative w-full h-full select-none text-[#202124]">
+<body class="overflow-hidden bg-slate-900 text-slate-800">
 
-  <!-- Full-Viewport Interactive Map -->
+  <!-- Top Floating Search & Category Bar -->
+  <div class="absolute top-4 left-4 right-4 md:left-6 md:right-auto md:w-[480px] z-[1000] flex flex-col gap-3 pointer-events-none">
+    <div class="flex items-center bg-white shadow-lg rounded-full px-4 py-2 pointer-events-auto border border-slate-200">
+      <button id="menu-btn" class="text-slate-600 hover:text-slate-900 mr-3 text-lg"><i class="fa-solid fa-bars"></i></button>
+      <input id="search-input" type="text" placeholder="Search Google Maps or address..." class="w-full bg-transparent outline-none text-slate-800 text-sm md:text-base pr-2">
+      <button id="search-btn" class="text-slate-500 hover:text-blue-600 px-2"><i class="fa-solid fa-magnifying-glass"></i></button>
+      <div class="h-6 w-[1px] bg-slate-300 mx-2"></div>
+      <button id="directions-trigger-btn" class="text-blue-600 hover:text-blue-700 px-2" title="Directions"><i class="fa-solid fa-diamond-turn-right text-lg"></i></button>
+    </div>
+
+    <!-- Category Chips -->
+    <div class="flex items-center gap-2 overflow-x-auto pb-1 pointer-events-auto custom-scrollbar no-scrollbar">
+      <button onclick="searchCategory('restaurant')" class="flex items-center gap-2 bg-white hover:bg-slate-50 shadow-md px-4 py-2 rounded-full text-xs font-medium text-slate-700 whitespace-nowrap border border-slate-100 transition"><i class="fa-solid fa-utensils text-red-500"></i> Restaurants</button>
+      <button onclick="searchCategory('cafe')" class="flex items-center gap-2 bg-white hover:bg-slate-50 shadow-md px-4 py-2 rounded-full text-xs font-medium text-slate-700 whitespace-nowrap border border-slate-100 transition"><i class="fa-solid fa-mug-hot text-amber-600"></i> Coffee</button>
+      <button onclick="searchCategory('hotel')" class="flex items-center gap-2 bg-white hover:bg-slate-50 shadow-md px-4 py-2 rounded-full text-xs font-medium text-slate-700 whitespace-nowrap border border-slate-100 transition"><i class="fa-solid fa-hotel text-blue-500"></i> Hotels</button>
+      <button onclick="searchCategory('park')" class="flex items-center gap-2 bg-white hover:bg-slate-50 shadow-md px-4 py-2 rounded-full text-xs font-medium text-slate-700 whitespace-nowrap border border-slate-100 transition"><i class="fa-solid fa-tree text-green-600"></i> Parks</button>
+      <button onclick="searchCategory('transit')" class="flex items-center gap-2 bg-white hover:bg-slate-50 shadow-md px-4 py-2 rounded-full text-xs font-medium text-slate-700 whitespace-nowrap border border-slate-100 transition"><i class="fa-solid fa-train text-purple-600"></i> Transit</button>
+    </div>
+  </div>
+
+  <!-- Autocomplete Results Dropdown -->
+  <div id="autocomplete-results" class="absolute top-20 left-4 md:left-6 md:w-[480px] bg-white shadow-xl rounded-2xl z-[1000] hidden overflow-hidden border border-slate-200"></div>
+
+  <!-- Left Sliding Drawer for Place Details / Directions -->
+  <div id="left-drawer" class="absolute top-0 left-0 w-full md:w-[420px] h-full bg-white shadow-2xl z-[1001] transform -translate-x-full transition-transform duration-300 flex flex-col">
+    <!-- Drawer Header -->
+    <div class="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+      <div class="flex items-center gap-3">
+        <button id="close-drawer" class="text-slate-500 hover:text-slate-800 text-lg w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-200"><i class="fa-solid fa-arrow-left"></i></button>
+        <h2 id="drawer-title" class="font-bold text-slate-800 text-lg">Location Details</h2>
+      </div>
+      <button id="close-drawer-x" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-xl"></i></button>
+    </div>
+    <!-- Drawer Body -->
+    <div id="drawer-content" class="flex-1 overflow-y-auto p-5 custom-scrollbar space-y-4">
+      <!-- Dynamically populated place details or directions panel -->
+    </div>
+  </div>
+
+  <!-- Map Container -->
   <div id="map"></div>
 
-  <!-- Top Floating Search Bar + Category Chips -->
-  <div id="top-ui-container" class="fixed top-3 left-3 right-3 sm:right-auto z-30 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pointer-events-none">
-    
-    <!-- Search Pill Box -->
-    <div class="relative w-full sm:w-[392px] pointer-events-auto">
-      <div class="flex items-center bg-white rounded-full shadow-[0_2px_6px_rgba(60,64,67,0.28)] border border-gray-100 h-12 px-3 transition-shadow focus-within:shadow-[0_4px_12px_rgba(60,64,67,0.32)]">
-        <!-- Hamburger / Saved Places Menu Button -->
-        <button id="btn-menu" title="Saved places & menu" class="p-2 rounded-full hover:bg-gray-100 text-[#5f6368] transition-colors flex-shrink-0">
-          <i data-lucide="menu" class="w-5 h-5"></i>
-        </button>
-
-        <!-- Search Input -->
-        <input
-          id="search-input"
-          type="text"
-          autocomplete="off"
-          placeholder="Search Google Maps"
-          class="w-full px-2.5 text-[15px] text-[#202124] placeholder-[#70757a] bg-transparent outline-none"
-        />
-
-        <!-- Clear Search Button -->
-        <button id="btn-clear-search" title="Clear search" class="hidden p-1.5 rounded-full hover:bg-gray-100 text-[#5f6368] transition-colors flex-shrink-0">
-          <i data-lucide="x" class="w-4 h-4"></i>
-        </button>
-
-        <!-- Search Submit Button -->
-        <button id="btn-search-submit" title="Search" class="p-2 rounded-full hover:bg-gray-100 text-[#5f6368] transition-colors flex-shrink-0">
-          <i data-lucide="search" class="w-5 h-5"></i>
-        </button>
-
-        <!-- Vertical Divider -->
-        <div class="h-6 w-[1px] bg-gray-200 mx-1 flex-shrink-0"></div>
-
-        <!-- Directions Blue Diamond Button -->
-        <button id="btn-open-directions" title="Directions" class="p-2 rounded-full hover:bg-blue-50 text-[#1A73E8] transition-colors flex-shrink-0">
-          <div class="w-6 h-6 bg-[#1A73E8] rounded-md rotate-45 flex items-center justify-center shadow-sm">
-            <i data-lucide="corner-up-right" class="w-3.5 h-3.5 text-white -rotate-45"></i>
-          </div>
-        </button>
-      </div>
-
-      <!-- Search Autocomplete Dropdown -->
-      <div id="search-dropdown" class="hidden mt-1.5 bg-white rounded-2xl shadow-[0_4px_16px_rgba(60,64,67,0.28)] border border-gray-100 overflow-hidden max-h-[340px] overflow-y-auto thin-scrollbar">
-        <!-- Populated dynamically -->
-      </div>
-    </div>
-
-    <!-- Horizontal Category Chips -->
-    <div id="category-chips" class="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5 pointer-events-auto max-w-full sm:max-w-[calc(100vw-430px)]">
-      <button data-category="restaurant" class="category-chip flex items-center gap-1.5 bg-white hover:bg-gray-50 text-[#3c4043] text-[13px] font-medium px-3.5 py-2 rounded-full shadow-[0_1px_4px_rgba(60,64,67,0.25)] border border-gray-100 whitespace-nowrap transition-all">
-        <i data-lucide="utensils" class="w-4 h-4 text-[#EA4335]"></i>
-        <span>Restaurants</span>
-      </button>
-      <button data-category="cafe" class="category-chip flex items-center gap-1.5 bg-white hover:bg-gray-50 text-[#3c4043] text-[13px] font-medium px-3.5 py-2 rounded-full shadow-[0_1px_4px_rgba(60,64,67,0.25)] border border-gray-100 whitespace-nowrap transition-all">
-        <i data-lucide="coffee" class="w-4 h-4 text-[#9334E6]"></i>
-        <span>Coffee</span>
-      </button>
-      <button data-category="hotel" class="category-chip flex items-center gap-1.5 bg-white hover:bg-gray-50 text-[#3c4043] text-[13px] font-medium px-3.5 py-2 rounded-full shadow-[0_1px_4px_rgba(60,64,67,0.25)] border border-gray-100 whitespace-nowrap transition-all">
-        <i data-lucide="bed" class="w-4 h-4 text-[#E52592]"></i>
-        <span>Hotels</span>
-      </button>
-      <button data-category="park" class="category-chip flex items-center gap-1.5 bg-white hover:bg-gray-50 text-[#3c4043] text-[13px] font-medium px-3.5 py-2 rounded-full shadow-[0_1px_4px_rgba(60,64,67,0.25)] border border-gray-100 whitespace-nowrap transition-all">
-        <i data-lucide="trees" class="w-4 h-4 text-[#188038]"></i>
-        <span>Parks</span>
-      </button>
-      <button data-category="transit" class="category-chip flex items-center gap-1.5 bg-white hover:bg-gray-50 text-[#3c4043] text-[13px] font-medium px-3.5 py-2 rounded-full shadow-[0_1px_4px_rgba(60,64,67,0.25)] border border-gray-100 whitespace-nowrap transition-all">
-        <i data-lucide="train-front" class="w-4 h-4 text-[#1A73E8]"></i>
-        <span>Transit</span>
-      </button>
-      <button data-category="gas" class="category-chip flex items-center gap-1.5 bg-white hover:bg-gray-50 text-[#3c4043] text-[13px] font-medium px-3.5 py-2 rounded-full shadow-[0_1px_4px_rgba(60,64,67,0.25)] border border-gray-100 whitespace-nowrap transition-all">
-        <i data-lucide="fuel" class="w-4 h-4 text-[#F9AB00]"></i>
-        <span>Gas</span>
-      </button>
-      <button data-category="museum" class="category-chip flex items-center gap-1.5 bg-white hover:bg-gray-50 text-[#3c4043] text-[13px] font-medium px-3.5 py-2 rounded-full shadow-[0_1px_4px_rgba(60,64,67,0.25)] border border-gray-100 whitespace-nowrap transition-all">
-        <i data-lucide="landmark" class="w-4 h-4 text-[#12B5CB]"></i>
-        <span>Museums</span>
-      </button>
-    </div>
-  </div>
-
-  <!-- Left Collapsible Side Drawer (Place Details / Directions / Saved Places) -->
-  <aside
-    id="side-drawer"
-    class="fixed left-0 top-0 bottom-0 w-full sm:w-[408px] bg-white shadow-[4px_0_18px_rgba(60,64,67,0.24)] z-20 transform -translate-x-full transition-transform duration-300 ease-out flex flex-col pt-20 sm:pt-[74px]"
-  >
-    <!-- Drawer Close / Collapse Handle (Desktop) -->
-    <button
-      id="btn-close-drawer"
-      title="Close panel"
-      class="hidden sm:flex items-center justify-center absolute -right-6 top-1/2 -translate-y-1/2 w-6 h-12 bg-white rounded-r-lg shadow-[2px_0_8px_rgba(60,64,67,0.2)] border-y border-r border-gray-200 text-[#5f6368] hover:text-[#202124]"
-    >
-      <i data-lucide="chevron-left" class="w-4 h-4"></i>
-    </button>
-
-    <!-- Mobile Close Top Bar -->
-    <div class="flex sm:hidden items-center justify-between px-4 py-2 border-b border-gray-100">
-      <span id="mobile-drawer-title" class="text-xs font-semibold uppercase tracking-wider text-[#5f6368]">Details</span>
-      <button id="btn-close-drawer-mobile" class="p-1.5 rounded-full hover:bg-gray-100 text-[#5f6368]">
-        <i data-lucide="x" class="w-5 h-5"></i>
-      </button>
-    </div>
-
-    <!-- Drawer Content Body -->
-    <div id="drawer-body" class="flex-1 overflow-y-auto thin-scrollbar">
-      <!-- Dynamically populated with Place Details, Directions, or Saved Places -->
-    </div>
-  </aside>
-
-  <!-- Bottom-Left Layers Thumbnail Switcher -->
-  <div id="layers-widget" class="fixed bottom-5 left-3 z-20 flex items-end gap-2.5">
-    <!-- Main Layers Square Button -->
-    <button
-      id="btn-toggle-layers"
-      class="group relative w-[74px] h-[74px] rounded-xl overflow-hidden bg-white p-1 shadow-[0_2px_8px_rgba(60,64,67,0.3)] border border-white hover:scale-[1.02] transition-transform"
-    >
-      <div id="layers-preview-bg" class="w-full h-full rounded-lg bg-gradient-to-br from-emerald-100 via-amber-50 to-sky-200 relative overflow-hidden">
-        <!-- Mini stylized road grid -->
-        <div class="absolute inset-0 opacity-60">
-          <div class="w-full h-1.5 bg-amber-300 rotate-12 translate-y-4"></div>
-          <div class="w-1.5 h-full bg-white -rotate-12 translate-x-6"></div>
-          <div class="w-5 h-5 rounded-full bg-sky-300/70 absolute top-2 right-2"></div>
-        </div>
-        <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/40 to-transparent py-1 px-1.5 flex items-center justify-center gap-1 text-white">
-          <i data-lucide="layers" class="w-3 h-3"></i>
-          <span class="text-[11px] font-medium tracking-tight">Layers</span>
-        </div>
-      </div>
-    </button>
-
-    <!-- Expandable Layer Options Popover -->
-    <div
-      id="layers-popover"
-      class="hidden bg-white rounded-2xl shadow-[0_4px_16px_rgba(60,64,67,0.28)] border border-gray-100 p-3.5 w-[272px]"
-    >
-      <div class="flex items-center justify-between mb-2.5">
-        <span class="text-xs font-semibold text-[#5f6368] uppercase tracking-wider">Map Type</span>
-        <button id="btn-close-layers" class="p-1 rounded-full hover:bg-gray-100 text-[#5f6368]">
-          <i data-lucide="x" class="w-3.5 h-3.5"></i>
-        </button>
-      </div>
-      <div class="grid grid-cols-4 gap-2 mb-3.5">
-        <button data-layer="default" class="layer-option flex flex-col items-center gap-1 group">
-          <div class="w-12 h-12 rounded-xl border-2 border-[#1A73E8] bg-gradient-to-br from-emerald-100 via-amber-50 to-sky-200 shadow-sm overflow-hidden flex items-center justify-center">
-            <i data-lucide="map" class="w-5 h-5 text-[#1A73E8]"></i>
-          </div>
-          <span class="text-[11px] font-medium text-[#1A73E8]">Default</span>
-        </button>
-        <button data-layer="satellite" class="layer-option flex flex-col items-center gap-1 group">
-          <div class="w-12 h-12 rounded-xl border-2 border-transparent bg-gradient-to-br from-slate-800 via-emerald-900 to-teal-900 shadow-sm overflow-hidden flex items-center justify-center">
-            <i data-lucide="globe" class="w-5 h-5 text-emerald-300"></i>
-          </div>
-          <span class="text-[11px] font-medium text-[#5f6368]">Satellite</span>
-        </button>
-        <button data-layer="terrain" class="layer-option flex flex-col items-center gap-1 group">
-          <div class="w-12 h-12 rounded-xl border-2 border-transparent bg-gradient-to-br from-lime-200 via-stone-200 to-emerald-200 shadow-sm overflow-hidden flex items-center justify-center">
-            <i data-lucide="mountain" class="w-5 h-5 text-emerald-800"></i>
-          </div>
-          <span class="text-[11px] font-medium text-[#5f6368]">Terrain</span>
-        </button>
-        <button data-layer="dark" class="layer-option flex flex-col items-center gap-1 group">
-          <div class="w-12 h-12 rounded-xl border-2 border-transparent bg-gradient-to-br from-zinc-900 via-slate-900 to-neutral-800 shadow-sm overflow-hidden flex items-center justify-center">
-            <i data-lucide="moon" class="w-5 h-5 text-indigo-300"></i>
-          </div>
-          <span class="text-[11px] font-medium text-[#5f6368]">Dark</span>
-        </button>
-      </div>
-
-      <div class="border-t border-gray-100 pt-2.5">
-        <span class="text-xs font-semibold text-[#5f6368] uppercase tracking-wider block mb-2">Map Details</span>
-        <div class="grid grid-cols-2 gap-2">
-          <button id="toggle-transit-overlay" class="flex items-center gap-2 px-2.5 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 text-xs font-medium text-[#3c4043] transition-colors">
-            <i data-lucide="train-front" class="w-4 h-4 text-[#1A73E8]"></i>
-            <span>Transit</span>
-          </button>
-          <button id="toggle-traffic-overlay" class="flex items-center gap-2 px-2.5 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 text-xs font-medium text-[#3c4043] transition-colors">
-            <i data-lucide="car" class="w-4 h-4 text-[#188038]"></i>
-            <span>Traffic</span>
-          </button>
+  <!-- Bottom-Right Floating Controls (Layers, GPS, 3D Walk) -->
+  <div class="absolute bottom-8 right-4 md:right-8 z-[1000] flex flex-col gap-3">
+    <!-- 3D Walk Mode Trigger Button -->
+    <button onclick="open3DWalkEnvironment()" class="bg-blue-600 hover:bg-blue-700 text-white shadow-lg w-12 h-12 rounded-2xl flex items-center justify-center text-xl transition transform hover:scale-105" title="Enter 3D Walk Mode (50m Radius)"><i class="fa-solid fa-vr-cardboard"></i></button>
+    <!-- Layers Picker -->
+    <div class="relative">
+      <button id="layers-btn" class="bg-white hover:bg-slate-50 text-slate-700 shadow-lg w-12 h-12 rounded-2xl flex items-center justify-center text-lg border border-slate-200 transition"><i class="fa-solid fa-layer-group"></i></button>
+      <div id="layers-menu" class="absolute bottom-14 right-0 bg-white shadow-xl rounded-2xl p-3 hidden w-48 border border-slate-200 space-y-2">
+        <div class="text-xs font-bold text-slate-400 uppercase tracking-wider px-2">Map Type</div>
+        <button onclick="setMapLayer('default')" class="w-full text-left px-3 py-2 rounded-xl text-sm font-medium hover:bg-slate-100 flex items-center gap-2 text-slate-700"><i class="fa-solid fa-map text-blue-500"></i> Default</button>
+        <button onclick="setMapLayer('satellite')" class="w-full text-left px-3 py-2 rounded-xl text-sm font-medium hover:bg-slate-100 flex items-center gap-2 text-slate-700"><i class="fa-solid fa-earth-americas text-green-600"></i> Satellite</button>
+        <button onclick="setMapLayer('terrain')" class="w-full text-left px-3 py-2 rounded-xl text-sm font-medium hover:bg-slate-100 flex items-center gap-2 text-slate-700"><i class="fa-solid fa-mountain text-amber-600"></i> Terrain</button>
+        <button onclick="setMapLayer('dark')" class="w-full text-left px-3 py-2 rounded-xl text-sm font-medium hover:bg-slate-100 flex items-center gap-2 text-slate-700"><i class="fa-solid fa-moon text-indigo-600"></i> Dark Mode</button>
+        <div class="border-t border-slate-100 pt-2">
+          <label class="flex items-center gap-2 px-2 text-sm font-medium text-slate-700 cursor-pointer">
+            <input type="checkbox" id="transit-toggle" onchange="toggleTransit(this.checked)" class="rounded text-blue-600 focus:ring-blue-500"> Transit Overlays
+          </label>
         </div>
       </div>
     </div>
+    <!-- GPS Locate Me Button -->
+    <button id="locate-btn" class="bg-white hover:bg-slate-50 text-slate-700 shadow-lg w-12 h-12 rounded-2xl flex items-center justify-center text-lg border border-slate-200 transition" title="Locate Me"><i class="fa-solid fa-location-crosshairs text-blue-600"></i></button>
   </div>
 
-  <!-- Bottom-Right Navigation Controls (Locate Me, Zoom +/-, Pegman Street View) -->
-  <div class="fixed bottom-6 right-3 z-20 flex flex-col items-center gap-2.5">
-    <!-- Locate Me Button -->
-    <button
-      id="btn-locate-me"
-      title="Show your location"
-      class="w-10 h-10 bg-white rounded-xl shadow-[0_2px_6px_rgba(60,64,67,0.28)] border border-gray-100 flex items-center justify-center text-[#5f6368] hover:text-[#1A73E8] hover:bg-gray-50 transition-colors"
-    >
-      <i data-lucide="locate-fixed" class="w-5 h-5"></i>
-    </button>
-
-    <!-- Zoom In / Out Pill -->
-    <div class="bg-white rounded-xl shadow-[0_2px_6px_rgba(60,64,67,0.28)] border border-gray-100 flex flex-col overflow-hidden">
-      <button
-        id="btn-zoom-in"
-        title="Zoom in"
-        class="w-10 h-10 flex items-center justify-center text-[#5f6368] hover:text-[#202124] hover:bg-gray-50 transition-colors border-b border-gray-100"
-      >
-        <i data-lucide="plus" class="w-5 h-5"></i>
-      </button>
-      <button
-        id="btn-zoom-out"
-        title="Zoom out"
-        class="w-10 h-10 flex items-center justify-center text-[#5f6368] hover:text-[#202124] hover:bg-gray-50 transition-colors"
-      >
-        <i data-lucide="minus" class="w-5 h-5"></i>
-      </button>
-    </div>
-
-    <!-- Pegman / Street View Button -->
-    <button
-      id="btn-street-view"
-      title="Browse Street View"
-      class="w-10 h-10 bg-white rounded-xl shadow-[0_2px_6px_rgba(60,64,67,0.28)] border border-gray-100 flex items-center justify-center text-[#F9AB00] hover:bg-amber-50 transition-colors"
-    >
-      <i data-lucide="person-standing" class="w-5 h-5"></i>
-    </button>
-  </div>
-
-  <!-- Toast Notification Pill (Replaces any alert()) -->
-  <div
-    id="toast-banner"
-    class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 pointer-events-none opacity-0 translate-y-3 transition-all duration-300 bg-[#202124] text-white text-xs sm:text-sm font-medium px-4 py-2.5 rounded-full shadow-lg flex items-center gap-2"
-  >
-    <span id="toast-message">Notification</span>
-  </div>
-
-  <!-- Simulated 360° Street View Modal -->
-  <div id="streetview-modal" class="hidden fixed inset-0 z-50 bg-black/90 flex flex-col">
-    <!-- Top Header -->
-    <div class="flex items-center justify-between px-4 py-3 bg-gradient-to-b from-black/80 to-transparent text-white z-10">
+  <!-- 3D Walk Environment Modal -->
+  <div id="modal-3d" class="fixed inset-0 z-[2000] bg-slate-950/90 hidden flex flex-col">
+    <!-- 3D Top Header Bar -->
+    <div class="flex items-center justify-between px-6 py-4 bg-slate-900 border-b border-slate-800 text-white">
       <div class="flex items-center gap-3">
-        <div class="w-9 h-9 rounded-full bg-[#F9AB00]/20 border border-[#F9AB00] flex items-center justify-center text-[#F9AB00]">
-          <i data-lucide="compass" class="w-5 h-5"></i>
-        </div>
+        <div class="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
         <div>
-          <h3 id="sv-title" class="text-sm font-semibold">Street View — Downtown Toronto</h3>
-          <p id="sv-coords" class="text-xs text-gray-300">43.6532° N, 79.3832° W • Drag horizontally to look around 360°</p>
+          <h2 class="font-bold text-lg">3D Walk Mode <span class="text-xs bg-blue-600 px-2 py-0.5 rounded-full ml-2">50m Radius</span></h2>
+          <p class="text-xs text-slate-400">Procedural 3D reconstruction around your GPS location</p>
         </div>
       </div>
-      <button id="btn-close-streetview" class="p-2 rounded-full bg-white/15 hover:bg-white/25 text-white transition-colors">
-        <i data-lucide="x" class="w-5 h-5"></i>
-      </button>
-    </div>
-
-    <!-- Interactive Draggable Panorama Canvas -->
-    <div
-      id="sv-panorama"
-      class="streetview-panorama flex-1 relative overflow-hidden flex items-center justify-center"
-      style="background-image: url('https://images.unsplash.com/photo-1517090504586-fde19ea6066f?auto=format&fit=crop&w=2400&q=80'); background-position: 50% 50%;"
-    >
-      <!-- Simulated Ground Direction Arrows -->
-      <div class="absolute bottom-16 left-1/2 -translate-x-1/2 flex items-center gap-6 pointer-events-none">
-        <div class="px-4 py-2 rounded-full bg-black/55 backdrop-blur-md border border-white/25 text-white text-xs flex items-center gap-2">
-          <i data-lucide="move-horizontal" class="w-4 h-4 text-[#F9AB00]"></i>
-          <span>Drag left or right to pan 360°</span>
+      <div class="flex items-center gap-4">
+        <div class="hidden md:flex items-center gap-2 text-xs text-slate-300 bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
+          <span><kbd class="bg-slate-700 px-1.5 py-0.5 rounded">W A S D</kbd> / <kbd class="bg-slate-700 px-1.5 py-0.5 rounded">Arrows</kbd> to Move</span>
+          <span class="mx-2">|</span>
+          <span><kbd class="bg-slate-700 px-1.5 py-0.5 rounded">Mouse Drag</kbd> to Look</span>
         </div>
+        <button onclick="close3DWalkEnvironment()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-xl text-sm font-medium transition border border-slate-700"><i class="fa-solid fa-xmark mr-2"></i> Exit 3D</button>
+      </div>
+    </div>
+    <!-- Canvas Container -->
+    <div id="canvas-container" class="flex-1 relative cursor-grab active:cursor-grabbing">
+      <!-- Crosshair -->
+      <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div class="w-2 h-2 rounded-full bg-white/60 border border-slate-900 shadow"></div>
+      </div>
+      <!-- Controls HUD for Mobile / Touch -->
+      <div class="absolute bottom-6 left-1/2 transform -translate-x-1/2 md:hidden flex gap-3 z-10">
+        <button id="btn-forward" class="bg-white/20 backdrop-blur text-white px-4 py-3 rounded-xl font-bold text-lg active:bg-white/40"><i class="fa-solid fa-arrow-up"></i></button>
       </div>
     </div>
   </div>
 
+  <!-- Notification Toast -->
+  <div id="toast" class="fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-slate-900/90 backdrop-blur text-white px-5 py-3 rounded-2xl shadow-2xl z-[3000] hidden text-sm font-medium transition-all"></div>
+
+  <!-- JavaScript Application Logic -->
   <script>
-    // =========================================================================
-    // 1. STATE & CURATED TORONTO PLACE DATASET
-    // =========================================================================
-    const DEFAULT_CENTER = [43.6532, -79.3832]; // Fallback Toronto center
-    const DEFAULT_ZOOM = 14;
+    let map, userLat = 43.6532, userLon = -79.3832; // Default Toronto center
+    let baseLayers = {}, currentLayerKey = 'default', transitLayer = null;
+    let markersLayer = L.layerGroup(), routeLayer = L.layerGroup();
+    let selectedPlace = null;
+    let threeApp = null; // Holds 3D scene cleanup handler
 
-    const state = {
-      map: null,
-      activeBaseLayer: 'default',
-      baseLayers: {},
-      transitLayer: null,
-      trafficLayer: null,
-      transitActive: false,
-      trafficActive: false,
-      markersLayer: null,
-      routeLayer: null,
-      userMarker: null,
-      selectedPlace: null,
-      activeCategory: null,
-      drawerMode: null, // 'place' | 'directions' | 'saved'
-      travelMode: 'driving', // 'driving' | 'walking' | 'cycling' | 'transit'
-      originCoords: [43.6452, -79.3806], // Initial fallback origin
-      originLabel: 'Your Location',
-      destCoords: null,
-      destLabel: '',
-      savedPlaces: JSON.parse(localStorage.getItem('gmaps_clone_saved') || '[]'),
-      svPanX: 50,
-      svDragging: false,
-      svStartX: 0
-    };
+    // Initialize Map on Load
+    window.addEventListener('DOMContentLoaded', () => {
+      initMap();
+      setupEventListeners();
+      getUserLocation(true);
+    });
 
-    // Category Metadata lookup table
-    const CATEGORY_META = {
-      restaurant: { query: 'restaurant', color: '#EA4335', label: 'Restaurants' },
-      cafe: { query: 'cafe', color: '#9334E6', label: 'Coffee' },
-      hotel: { query: 'hotel', color: '#E52592', label: 'Hotels' },
-      park: { query: 'park', color: '#188038', label: 'Parks' },
-      transit: { query: 'station', color: '#1A73E8', label: 'Transit' },
-      gas: { query: 'fuel', color: '#F9AB00', label: 'Gas Stations' },
-      museum: { query: 'museum', color: '#12B5CB', label: 'Museums' },
-      default: { query: 'attraction', color: '#EA4335', label: 'Place' }
-    };
-
-    // =========================================================================
-    // 2. MAP INITIALIZATION & ESRI TILE LAYERS
-    // =========================================================================
-    function initMap() {
-      state.map = L.map('map', {
-        center: DEFAULT_CENTER,
-        zoom: DEFAULT_ZOOM,
-        zoomControl: false
-      });
-
-      // Keyless Esri Map Server layers
-      state.baseLayers = {
-        default: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
-          attribution: 'Tiles &copy; Esri',
-          maxZoom: 19
-        }),
-        satellite: L.layerGroup([
-          L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-            attribution: 'Tiles &copy; Esri',
-            maxZoom: 19
-          }),
-          L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-            attribution: 'Labels &copy; Esri',
-            maxZoom: 19,
-            opacity: 0.9
-          })
-        ]),
-        terrain: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
-          attribution: 'Tiles &copy; Esri',
-          maxZoom: 19
-        }),
-        dark: L.layerGroup([
-          L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-            attribution: 'Tiles &copy; Esri',
-            maxZoom: 16
-          }),
-          L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
-            attribution: 'Labels &copy; Esri',
-            maxZoom: 16
-          })
-        ])
-      };
-
-      state.baseLayers.default.addTo(state.map);
-
-      // Overlays
-      const transportOverlay = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
-        attribution: 'Transportation &copy; Esri',
-        opacity: 0.75,
-        maxZoom: 19
-      });
-
-      state.transitLayer = L.layerGroup([transportOverlay]);
-      state.trafficLayer = L.layerGroup([transportOverlay]);
-      state.markersLayer = L.layerGroup().addTo(state.map);
-      state.routeLayer = L.layerGroup().addTo(state.map);
+    function showToast(msg, duration = 3000) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.remove('hidden');
+      setTimeout(() => toast.classList.add('hidden'), duration);
     }
 
-    // =========================================================================
-    // 3. SEARCH, NOMINATIM GEOCODING & CATEGORIES
-    // =========================================================================
-    function initSearchAndChips() {
-      const searchInput = document.getElementById('search-input');
-      const searchDropdown = document.getElementById('search-dropdown');
-      const clearBtn = document.getElementById('btn-clear-search');
+    function initMap() {
+      map = L.map('map', { zoomControl: false }).setView([userLat, userLon], 14);
 
-      searchInput.addEventListener('input', (e) => {
-        const val = e.target.value.trim();
-        clearBtn.classList.toggle('hidden', val.length === 0);
-        if (val.length < 2) {
-          searchDropdown.classList.add('hidden');
+      // Define Esri keyless tile layers
+      baseLayers.default = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri', maxZoom: 19
+      });
+      baseLayers.satellite = L.layerGroup([
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri', maxZoom: 19 }),
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { attribution: 'Labels &copy; Esri', maxZoom: 19, opacity: 0.9 })
+      ]);
+      baseLayers.terrain = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri', maxZoom: 19
+      });
+      baseLayers.dark = L.layerGroup([
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri', maxZoom: 16 }),
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', { attribution: 'Labels &copy; Esri', maxZoom: 16 })
+      ]);
+
+      baseLayers.default.addTo(map);
+      markersLayer.addTo(map);
+      routeLayer.addTo(map);
+
+      // Add Zoom Control to Bottom Right
+      L.control.zoom({ position: 'bottomright' }).addTo(map);
+    }
+
+    function setMapLayer(key) {
+      if (baseLayers[currentLayerKey]) map.removeLayer(baseLayers[currentLayerKey]);
+      currentLayerKey = key;
+      if (baseLayers[key]) baseLayers[key].addTo(map);
+      document.getElementById('layers-menu').classList.add('hidden');
+      showToast(`Switched to ${key} map`);
+    }
+
+    function toggleTransit(enabled) {
+      if (enabled) {
+        transitLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
+          attribution: 'Transportation &copy; Esri', opacity: 0.8, maxZoom: 19
+        });
+        transitLayer.addTo(map);
+        showToast('Transit layer enabled');
+      } else if (transitLayer) {
+        map.removeLayer(transitLayer);
+        transitLayer = null;
+        showToast('Transit layer disabled');
+      }
+    }
+
+    function setupEventListeners() {
+      document.getElementById('layers-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const menu = document.getElementById('layers-menu');
+        menu.classList.toggle('hidden');
+      });
+
+      document.addEventListener('click', () => {
+        document.getElementById('layers-menu').classList.add('hidden');
+        document.getElementById('autocomplete-results').classList.add('hidden');
+      });
+
+      document.getElementById('locate-btn').addEventListener('click', () => getUserLocation(false));
+
+      document.getElementById('close-drawer').addEventListener('click', closeDrawer);
+      document.getElementById('close-drawer-x').addEventListener('click', closeDrawer);
+
+      const searchInput = document.getElementById('search-input');
+      searchInput.addEventListener('input', debounce(async (e) => {
+        const query = e.target.value.trim();
+        if (query.length < 2) {
+          document.getElementById('autocomplete-results').classList.add('hidden');
           return;
         }
-        fetchNominatimSuggestions(val);
-      });
-
-      clearBtn.addEventListener('click', () => {
-        searchInput.value = '';
-        clearBtn.classList.add('hidden');
-        searchDropdown.classList.add('hidden');
-        searchInput.focus();
-      });
-
-      document.getElementById('btn-search-submit').addEventListener('click', () => {
-        const val = searchInput.value.trim();
-        if (val) performSearch(val);
-      });
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`);
+          const data = await res.json();
+          renderAutocomplete(data);
+        } catch (err) {
+          console.error(err);
+        }
+      }, 300));
 
       searchInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
-          const val = searchInput.value.trim();
-          if (val) performSearch(val);
+          performSearch(searchInput.value);
+          document.getElementById('autocomplete-results').classList.add('hidden');
         }
       });
 
-      document.querySelectorAll('.category-chip').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const cat = btn.dataset.category;
-          document.querySelectorAll('.category-chip').forEach(b => b.classList.remove('ring-2', 'ring-[#1A73E8]'));
-          btn.classList.add('ring-2', 'ring-[#1A73E8]');
-          state.activeCategory = cat;
-          searchCategoryPlaces(cat);
-        });
+      document.getElementById('search-btn').addEventListener('click', () => {
+        performSearch(searchInput.value);
+        document.getElementById('autocomplete-results').classList.add('hidden');
       });
     }
 
-    async function fetchNominatimSuggestions(query) {
-      const searchDropdown = document.getElementById('search-dropdown');
-      try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=6&addressdetails=1`);
-        const data = await res.json();
+    function debounce(func, wait) {
+      let timeout;
+      return function(...args) {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(this, args), wait);
+      };
+    }
 
-        if (!data || data.length === 0) {
-          searchDropdown.innerHTML = `<div class="px-4 py-3 text-xs text-[#70757a]">No matching places found</div>`;
-          searchDropdown.classList.remove('hidden');
-          return;
-        }
+    function getUserLocation(initial = false) {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition((pos) => {
+          userLat = pos.coords.latitude;
+          userLon = pos.coords.longitude;
+          map.setView([userLat, userLon], 15);
+          
+          // Add User Marker
+          L.marker([userLat, userLon], {
+            icon: L.divIcon({
+              className: 'custom-user-pin',
+              html: '<div class="w-6 h-6 bg-blue-600 rounded-full border-4 border-white shadow-lg animate-pulse"></div>',
+              iconSize: [24, 24],
+              iconAnchor: [12, 12]
+            })
+          }).addTo(map).bindPopup('<b>You are here</b>');
 
-        searchDropdown.innerHTML = data.map(item => `
-          <div class="search-item flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-0 transition-colors"
-               data-lat="${item.lat}" data-lon="${item.lon}" data-name="${item.display_name}">
-            <div class="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center text-[#1A73E8] flex-shrink-0">
-              <i data-lucide="map-pin" class="w-4 h-4"></i>
-            </div>
-            <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-[#202124] truncate">${item.display_name.split(',')[0]}</p>
-              <p class="text-xs text-[#70757a] truncate">${item.display_name}</p>
-            </div>
-          </div>
-        `).join('');
-
-        lucide.createIcons();
-        searchDropdown.classList.remove('hidden');
-
-        searchDropdown.querySelectorAll('.search-item').forEach(el => {
-          el.addEventListener('click', () => {
-            const lat = parseFloat(el.dataset.lat);
-            const lon = parseFloat(el.dataset.lon);
-            const name = el.dataset.name;
-            document.getElementById('search-input').value = name.split(',')[0];
-            searchDropdown.classList.add('hidden');
-            selectPlace({
-              name: name.split(',')[0],
-              address: name,
-              lat: lat,
-              lng: lon,
-              category: 'default',
-              rating: (4.2 + Math.random() * 0.7).toFixed(1),
-              reviewsCount: Math.floor(120 + Math.random() * 850),
-              photo: 'https://images.unsplash.com/photo-1517090504586-fde19ea6066f?auto=format&fit=crop&w=1200&q=80'
-            });
-          });
-        });
-      } catch (err) {
-        console.error('Nominatim error:', err);
+          if (!initial) showToast('Centered on your device location');
+        }, (err) => {
+          console.warn('Geolocation denied or unavailable:', err);
+          if (!initial) showToast('Could not fetch device location. Using default.');
+        }, { enableHighAccuracy: true });
       }
     }
 
     async function performSearch(query) {
-      const searchDropdown = document.getElementById('search-dropdown');
-      searchDropdown.classList.add('hidden');
+      if (!query) return;
+      showToast(`Searching for "${query}"...`);
       try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=10`);
         const data = await res.json();
         if (data && data.length > 0) {
-          const item = data[0];
-          selectPlace({
-            name: item.display_name.split(',')[0],
-            address: item.display_name,
-            lat: parseFloat(item.lat),
-            lng: parseFloat(item.lon),
-            category: 'default',
-            rating: '4.6',
-            reviewsCount: 342,
-            photo: 'https://images.unsplash.com/photo-1517090504586-fde19ea6066f?auto=format&fit=crop&w=1200&q=80'
+          markersLayer.clearLayers();
+          const first = data[0];
+          const lat = parseFloat(first.lat);
+          const lon = parseFloat(first.lon);
+          map.setView([lat, lon], 15);
+
+          data.forEach(item => {
+            const mLat = parseFloat(item.lat);
+            const mLon = parseFloat(item.lon);
+            const marker = L.marker([mLat, mLon]).addTo(markersLayer);
+            marker.on('click', () => selectPlaceDetails({
+              name: item.display_name.split(',')[0],
+              address: item.display_name,
+              lat: mLat,
+              lon: mLon,
+              type: item.type || 'Location'
+            }));
+          });
+
+          selectPlaceDetails({
+            name: first.display_name.split(',')[0],
+            address: first.display_name,
+            lat,
+            lon,
+            type: first.type || 'Location'
           });
         } else {
-          showToast('Location not found');
+          showToast('No locations found');
         }
-      } catch (e) {
+      } catch (err) {
+        console.error(err);
         showToast('Search failed');
       }
     }
 
-    async function searchCategoryPlaces(categoryKey) {
-      const meta = CATEGORY_META[categoryKey] || CATEGORY_META.default;
-      const center = state.map.getCenter();
-      state.markersLayer.clearLayers();
+    function renderAutocomplete(results) {
+      const container = document.getElementById('autocomplete-results');
+      if (!results || results.length === 0) {
+        container.classList.add('hidden');
+        return;
+      }
+      container.innerHTML = results.map(item => `
+        <div class="px-4 py-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-none flex items-center gap-3 text-sm text-slate-700" onclick="selectAutocompleteItem(${item.lat}, ${item.lon}, '${encodeURIComponent(item.display_name)}')">
+          <i class="fa-solid fa-location-dot text-slate-400"></i>
+          <span class="truncate">${item.display_name}</span>
+        </div>
+      `).join('');
+      container.classList.remove('hidden');
+    }
 
-      showToast(`Searching for ${meta.label} nearby...`);
+    function selectAutocompleteItem(lat, lon, encodedName) {
+      const name = decodeURIComponent(encodedName);
+      document.getElementById('search-input').value = name;
+      document.getElementById('autocomplete-results').classList.add('hidden');
+      map.setView([lat, lon], 16);
+      markersLayer.clearLayers();
+      L.marker([lat, lon]).addTo(markersLayer);
+      selectPlaceDetails({ name: name.split(',')[0], address: name, lat, lon, type: 'Selected Place' });
+    }
 
+    async function searchCategory(category) {
+      showToast(`Searching nearby ${category}s...`);
       try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(meta.query)}&bounded=1&viewbox=${center.lng-0.08},${center.lat+0.08},${center.lng+0.08},${center.lat-0.08}&limit=12`);
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${category}&bounded=1&viewbox=${userLon-0.05},${userLat+0.05},${userLon+0.05},${userLat-0.05}&limit=12`);
         const data = await res.json();
-
-        if (!data || data.length === 0) {
-          showToast(`No ${meta.label} found in this viewport`);
-          return;
+        markersLayer.clearLayers();
+        if (data && data.length > 0) {
+          const group = [];
+          data.forEach(item => {
+            const lat = parseFloat(item.lat);
+            const lon = parseFloat(item.lon);
+            const marker = L.marker([lat, lon]).addTo(markersLayer);
+            group.push([lat, lon]);
+            marker.on('click', () => selectPlaceDetails({
+              name: item.display_name.split(',')[0],
+              address: item.display_name,
+              lat, lon, type: category
+            }));
+          });
+          map.fitBounds(L.latLngBounds(group), { padding: [50, 50] });
+          showToast(`Found ${data.length} ${category}s nearby`);
+        } else {
+          showToast(`No ${category}s found nearby`);
         }
-
-        data.forEach(item => {
-          const place = {
-            name: item.display_name.split(',')[0],
-            address: item.display_name,
-            lat: parseFloat(item.lat),
-            lng: parseFloat(item.lon),
-            category: categoryKey,
-            rating: (4.1 + Math.random() * 0.8).toFixed(1),
-            reviewsCount: Math.floor(45 + Math.random() * 600),
-            photo: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1200&q=80'
-          };
-          addPinToMap(place);
-        });
-
-        showToast(`Found ${data.length} ${meta.label}`);
       } catch (err) {
-        showToast('Failed to fetch category results');
+        console.error(err);
+        showToast('Category search failed');
       }
     }
 
-    // =========================================================================
-    // 4. MAP PINS & PLACE SELECTION DRAWER
-    // =========================================================================
-    function addPinToMap(place) {
-      const meta = CATEGORY_META[place.category] || CATEGORY_META.default;
-      const marker = L.marker([place.lat, place.lng], {
-        icon: L.divIcon({
-          className: 'google-pin-wrapper',
-          iconSize: [36, 46],
-          iconAnchor: [18, 46],
-          popupAnchor: [0, -42],
-          html: `
-            <div class="relative group cursor-pointer flex flex-col items-center">
-              <div class="w-9 h-9 rounded-full shadow-lg flex items-center justify-center text-white transition-transform group-hover:scale-110" style="background-color: ${meta.color}">
-                <i data-lucide="map-pin" class="w-5 h-5 text-white"></i>
-              </div>
-              <div class="w-2 h-2 bg-black/40 rounded-full blur-[1px] mt-0.5"></div>
-            </div>
-          `
-        })
-      });
+    function selectPlaceDetails(place) {
+      selectedPlace = place;
+      const drawer = document.getElementById('left-drawer');
+      const content = document.getElementById('drawer-content');
+      document.getElementById('drawer-title').textContent = place.name;
 
-      marker.on('click', () => selectPlace(place));
-      state.markersLayer.addLayer(marker);
-      lucide.createIcons();
-    }
-
-    function selectPlace(place) {
-      state.selectedPlace = place;
-      state.map.flyTo([place.lat, place.lng], 16, { duration: 0.8 });
-      state.drawerMode = 'place';
-
-      const isSaved = state.savedPlaces.some(p => p.name === place.name);
-      const body = document.getElementById('drawer-body');
-
-      body.innerHTML = `
-        <div class="relative h-56 bg-gray-200">
-          <img src="${place.photo}" alt="${place.name}" class="w-full h-full object-cover" onerror="this.src='https://images.unsplash.com/photo-1517090504586-fde19ea6066f?auto=format&fit=crop&w=1200&q=80'" />
-          <div class="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent"></div>
-          <div class="absolute bottom-4 left-4 right-4 text-white">
-            <h1 class="text-xl font-bold leading-tight">${place.name}</h1>
-            <p class="text-xs text-gray-200 mt-1">${place.address}</p>
+      content.innerHTML = `
+        <div class="space-y-4">
+          <div class="h-48 rounded-2xl overflow-hidden shadow bg-slate-100 relative">
+            <img src="https://placehold.co/600x400/e2e8f0/475569?text=${encodeURIComponent(place.name)}" alt="${place.name}" class="w-full h-full object-cover">
+            <div class="absolute bottom-3 left-3 bg-black/60 backdrop-blur text-white text-xs px-3 py-1 rounded-full font-medium">⭐ 4.6 (128 reviews)</div>
           </div>
-        </div>
-        <div class="p-5">
-          <div class="flex items-center gap-3 pb-4 border-b border-gray-100">
-            <div class="flex items-center gap-1 text-amber-500 font-bold text-sm">
-              <span>${place.rating}</span>
-              <div class="flex">
-                <i data-lucide="star" class="w-4 h-4 fill-amber-400 text-amber-400"></i>
-              </div>
-            </div>
-            <span class="text-xs text-[#70757a]">(${place.reviewsCount} reviews)</span>
-            <span class="text-gray-300">•</span>
-            <span class="text-xs font-medium text-[#188038]">Open Now</span>
+          <div>
+            <span class="text-xs font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg">${place.type}</span>
+            <h1 class="text-xl font-bold text-slate-800 mt-2">${place.name}</h1>
+            <p class="text-sm text-slate-500 mt-1"><i class="fa-solid fa-location-dot text-red-500 mr-2"></i>${place.address}</p>
           </div>
-
-          <!-- Action Buttons -->
-          <div class="grid grid-cols-3 gap-2.5 py-4 border-b border-gray-100">
-            <button id="drawer-btn-directions" class="flex flex-col items-center gap-1.5 p-3 rounded-2xl bg-blue-50 hover:bg-blue-100 text-[#1A73E8] transition-colors">
-              <i data-lucide="navigation" class="w-5 h-5"></i>
-              <span class="text-xs font-semibold">Directions</span>
-            </button>
-            <button id="drawer-btn-save" class="flex flex-col items-center gap-1.5 p-3 rounded-2xl hover:bg-gray-50 text-[#3c4043] transition-colors">
-              <i data-lucide="bookmark" class="w-5 h-5 ${isSaved ? 'fill-[#1A73E8] text-[#1A73E8]' : ''}"></i>
-              <span class="text-xs font-semibold">${isSaved ? 'Saved' : 'Save'}</span>
-            </button>
-            <button id="drawer-btn-streetview" class="flex flex-col items-center gap-1.5 p-3 rounded-2xl hover:bg-gray-50 text-[#3c4043] transition-colors">
-              <i data-lucide="person-standing" class="w-5 h-5"></i>
-              <span class="text-xs font-semibold">Street View</span>
-            </button>
+          <div class="flex gap-3 pt-2">
+            <button onclick="calculateDirections(${place.lat}, ${place.lon})" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-medium text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 transition"><i class="fa-solid fa-diamond-turn-right"></i> Directions</button>
+            <button onclick="saveFavoritePlace()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-3 rounded-xl font-medium text-sm transition"><i class="fa-regular fa-bookmark"></i></button>
           </div>
-
-          <div class="py-4 space-y-3">
-            <div class="flex items-start gap-3 text-sm text-[#3c4043]">
-              <i data-lucide="map-pin" class="w-5 h-5 text-[#5f6368] flex-shrink-0 mt-0.5"></i>
-              <span>${place.address}</span>
-            </div>
-            <div class="flex items-start gap-3 text-sm text-[#3c4043]">
-              <i data-lucide="clock" class="w-5 h-5 text-[#5f6368] flex-shrink-0 mt-0.5"></i>
-              <div>
-                <p class="font-medium text-[#188038]">Open ⋅ Closes 10 PM</p>
-                <p class="text-xs text-[#70757a]">Hours might differ on holidays</p>
-              </div>
-            </div>
-            <div class="flex items-start gap-3 text-sm text-[#3c4043]">
-              <i data-lucide="globe" class="w-5 h-5 text-[#5f6368] flex-shrink-0 mt-0.5"></i>
-              <a href="#" class="text-[#1A73E8] hover:underline truncate">www.${place.name.toLowerCase().replace(/[^a-z0-9]/g, '')}.com</a>
-            </div>
+          <div class="border-t border-slate-100 pt-4 space-y-3">
+            <div class="flex items-center gap-3 text-sm text-slate-600"><i class="fa-solid fa-clock text-slate-400 w-5"></i> Open ⋅ Closes 10:00 PM</div>
+            <div class="flex items-center gap-3 text-sm text-slate-600"><i class="fa-solid fa-phone text-slate-400 w-5"></i> +1 (555) 019-2834</div>
+            <div class="flex items-center gap-3 text-sm text-slate-600"><i class="fa-solid fa-globe text-slate-400 w-5"></i> https://www.openstreetmap.org</div>
           </div>
         </div>
       `;
-
-      lucide.createIcons();
-      openDrawer('Place Details');
-
-      document.getElementById('drawer-btn-directions').addEventListener('click', () => {
-        state.destCoords = [place.lat, place.lng];
-        state.destLabel = place.name;
-        openDirectionsDrawer();
-      });
-
-      document.getElementById('drawer-btn-save').addEventListener('click', () => {
-        toggleSavePlace(place);
-      });
-
-      document.getElementById('drawer-btn-streetview').addEventListener('click', () => {
-        openStreetView(place);
-      });
-    }
-
-    // =========================================================================
-    // 5. SAVED PLACES MANAGEMENT
-    // =========================================================================
-    function toggleSavePlace(place) {
-      const idx = state.savedPlaces.findIndex(p => p.name === place.name);
-      if (idx > -1) {
-        state.savedPlaces.splice(idx, 1);
-        showToast('Removed from Saved Places');
-      } else {
-        state.savedPlaces.push(place);
-        showToast('Saved to your Places!');
-      }
-      localStorage.setItem('gmaps_clone_saved', JSON.stringify(state.savedPlaces));
-      selectPlace(place); // Refresh drawer UI
-    }
-
-    function openSavedPlacesDrawer() {
-      state.drawerMode = 'saved';
-      const body = document.getElementById('drawer-body');
-
-      body.innerHTML = `
-        <div class="p-5">
-          <div class="flex items-center justify-between mb-4">
-            <h2 class="text-lg font-bold text-[#202124]">Saved Places</h2>
-            <span class="text-xs bg-blue-50 text-[#1A73E8] font-semibold px-2.5 py-1 rounded-full">${state.savedPlaces.length} places</span>
-          </div>
-          ${state.savedPlaces.length === 0 ? `
-            <div class="text-center py-16 text-[#70757a]">
-              <i data-lucide="bookmark" class="w-12 h-12 mx-auto mb-3 opacity-40"></i>
-              <p class="text-sm font-medium">No saved places yet</p>
-              <p class="text-xs mt-1">Click 'Save' on any location details card to bookmark it here.</p>
-            </div>
-          ` : `
-            <div class="space-y-3">
-              ${state.savedPlaces.map(p => `
-                <div class="saved-item flex items-center gap-3 p-3 rounded-2xl border border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors" data-name="${p.name}">
-                  <img src="${p.photo}" class="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
-                  <div class="flex-1 min-w-0">
-                    <h3 class="text-sm font-semibold text-[#202124] truncate">${p.name}</h3>
-                    <p class="text-xs text-[#70757a] truncate">${p.address}</p>
-                    <div class="flex items-center gap-1 mt-1 text-xs text-amber-500 font-medium">
-                      <span>★ ${p.rating}</span>
-                    </div>
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-          `}
-        </div>
-      `;
-
-      lucide.createIcons();
-      openDrawer('Saved Places');
-
-      body.querySelectorAll('.saved-item').forEach(el => {
-        el.addEventListener('click', () => {
-          const name = el.dataset.name;
-          const found = state.savedPlaces.find(p => p.name === name);
-          if (found) selectPlace(found);
-        });
-      });
-    }
-
-    // =========================================================================
-    // 6. TURN-BY-TURN DIRECTIONS & OSRM ROUTING
-    // =========================================================================
-    function openDirectionsDrawer() {
-      state.drawerMode = 'directions';
-      const body = document.getElementById('drawer-body');
-
-      body.innerHTML = `
-        <div class="p-5 border-b border-gray-100 bg-gray-50">
-          <div class="flex items-center justify-between mb-3">
-            <h2 class="text-base font-bold text-[#202124]">Get Directions</h2>
-            <button id="btn-swap-route" class="p-2 rounded-full hover:bg-gray-200 text-[#5f6368]" title="Swap origin & destination">
-              <i data-lucide="arrow-swap" class="w-4 h-4"></i>
-            </button>
-          </div>
-
-          <div class="space-y-2">
-            <div class="flex items-center gap-2.5 bg-white px-3 py-2.5 rounded-xl border border-gray-200 shadow-sm">
-              <div class="w-3 h-3 rounded-full bg-[#1A73E8]"></div>
-              <input id="route-origin" type="text" value="${state.originLabel}" class="w-full text-sm outline-none bg-transparent" placeholder="Choose starting point" />
-            </div>
-            <div class="flex items-center gap-2.5 bg-white px-3 py-2.5 rounded-xl border border-gray-200 shadow-sm">
-              <div class="w-3 h-3 rounded-full bg-[#EA4335]"></div>
-              <input id="route-dest" type="text" value="${state.destLabel || ''}" class="w-full text-sm outline-none bg-transparent" placeholder="Choose destination" />
-            </div>
-          </div>
-
-          <!-- Travel Mode Selector Tabs -->
-          <div class="flex items-center justify-between mt-4">
-            <button data-mode="driving" class="travel-mode-btn flex-1 flex flex-col items-center gap-1 py-2 rounded-xl text-xs font-semibold ${state.travelMode==='driving'?'bg-[#1A73E8] text-white':'hover:bg-gray-200 text-[#5f6368]'}">
-              <i data-lucide="car" class="w-4 h-4"></i>
-              <span>Drive</span>
-            </button>
-            <button data-mode="transit" class="travel-mode-btn flex-1 flex flex-col items-center gap-1 py-2 rounded-xl text-xs font-semibold ${state.travelMode==='transit'?'bg-[#1A73E8] text-white':'hover:bg-gray-200 text-[#5f6368]'}">
-              <i data-lucide="train-front" class="w-4 h-4"></i>
-              <span>Transit</span>
-            </button>
-            <button data-mode="walking" class="travel-mode-btn flex-1 flex flex-col items-center gap-1 py-2 rounded-xl text-xs font-semibold ${state.travelMode==='walking'?'bg-[#1A73E8] text-white':'hover:bg-gray-200 text-[#5f6368]'}">
-              <i data-lucide="footprints" class="w-4 h-4"></i>
-              <span>Walk</span>
-            </button>
-            <button data-mode="cycling" class="travel-mode-btn flex-1 flex flex-col items-center gap-1 py-2 rounded-xl text-xs font-semibold ${state.travelMode==='cycling'?'bg-[#1A73E8] text-white':'hover:bg-gray-200 text-[#5f6368]'}">
-              <i data-lucide="bike" class="w-4 h-4"></i>
-              <span>Bike</span>
-            </button>
-          </div>
-        </div>
-
-        <div id="route-steps-container" class="p-5">
-          ${state.destCoords ? `
-            <div class="text-center py-6">
-              <div class="inline-block animate-spin rounded-full h-8 v-8 border-4 border-[#1A73E8] border-t-transparent"></div>
-              <p class="text-xs text-[#70757a] mt-2">Calculating best route...</p>
-            </div>
-          ` : `
-            <div class="text-center py-12 text-[#70757a]">
-              <i data-lucide="navigation" class="w-10 h-10 mx-auto mb-2 opacity-40"></i>
-              <p class="text-sm font-medium">Enter a destination to calculate route</p>
-            </div>
-          `}
-        </div>
-      `;
-
-      lucide.createIcons();
-      openDrawer('Directions');
-
-      body.querySelectorAll('.travel-mode-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          state.travelMode = btn.dataset.mode;
-          openDirectionsDrawer();
-          if (state.destCoords) calculateAndDrawRoute();
-        });
-      });
-
-      if (state.destCoords) {
-        calculateAndDrawRoute();
-      }
-    }
-
-    async function calculateAndDrawRoute() {
-      const stepsContainer = document.getElementById('route-steps-container');
-      state.routeLayer.clearLayers();
-
-      const [origLat, origLng] = state.originCoords;
-      const [destLat, destLng] = state.destCoords;
-
-      const profileMap = {
-        driving: 'driving',
-        walking: 'walking',
-        cycling: 'cycling',
-        transit: 'driving' // OSRM fallback for transit
-      };
-      const profile = profileMap[state.travelMode] || 'driving';
-
-      try {
-        const url = `https://router.project-osrm.org/route/v1/${profile}/${origLng},${origLat};${destLng},${destLat}?overview=full&geometries=geojson&steps=true`;
-        const res = await fetch(url);
-        const data = await res.json();
-
-        if (!data.routes || data.routes.length === 0) {
-          stepsContainer.innerHTML = `<p class="text-sm text-red-500 text-center py-4">Could not calculate route.</p>`;
-          return;
-        }
-
-        const route = data.routes[0];
-        const distanceKm = (route.distance / 1000).toFixed(1);
-        const durationMin = Math.round(route.duration / 60);
-
-        // Draw polyline on map
-        const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
-        const polyline = L.polyline(coords, {
-          color: '#1A73E8',
-          weight: 6,
-          opacity: 0.85
-        }).addTo(state.routeLayer);
-
-        state.map.fitBounds(polyline.getBounds(), { padding: [60, 60] });
-
-        // Populate step-by-step UI
-        let stepsHtml = `
-          <div class="bg-blue-50 border border-blue-100 rounded-2xl p-4 mb-4">
-            <div class="flex items-center justify-between">
-              <span class="text-lg font-bold text-[#1A73E8]">${durationMin} min</span>
-              <span class="text-xs font-semibold text-[#5f6368]">${distanceKm} km</span>
-            </div>
-            <p class="text-xs text-[#70757a] mt-0.5">Fastest route considering current traffic</p>
-          </div>
-          <h3 class="text-xs font-semibold uppercase tracking-wider text-[#5f6368] mb-3">Turn-by-turn directions</h3>
-          <div class="space-y-3">
-        `;
-
-        const legs = route.legs[0].steps;
-        legs.forEach((step, idx) => {
-          const instruction = step.maneuver.instruction || 'Continue straight';
-          const dist = step.distance > 100 ? `${Math.round(step.distance)} m` : `${Math.round(step.distance)} m`;
-          stepsHtml += `
-            <div class="flex items-start gap-3 text-sm pb-3 border-b border-gray-100 last:border-0">
-              <div class="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-[#5f6368] text-xs font-bold flex-shrink-0 mt-0.5">${idx + 1}</div>
-              <div class="flex-1">
-                <p class="text-[#202124] font-medium">${instruction}</p>
-                <p class="text-xs text-[#70757a] mt-0.5">${dist}</p>
-              </div>
-            </div>
-          `;
-        });
-
-        stepsHtml += `</div>`;
-        stepsContainer.innerHTML = stepsHtml;
-      } catch (err) {
-        stepsContainer.innerHTML = `<p class="text-sm text-red-500 text-center py-4">Routing network error.</p>`;
-      }
-    }
-
-    // =========================================================================
-    // 7. STREET VIEW DRAG INTERACTION
-    // =========================================================================
-    function initStreetViewDrag() {
-      const pano = document.getElementById('streetview-panorama');
-      if (!pano) return;
-
-      pano.addEventListener('mousedown', (e) => {
-        state.svDragging = true;
-        state.svStartX = e.clientX;
-      });
-
-      window.addEventListener('mousemove', (e) => {
-        if (!state.svDragging) return;
-        const deltaX = e.clientX - state.svStartX;
-        state.svPanX = (state.svPanX - deltaX * 0.15) % 200;
-        if (state.svPanX < 0) state.svPanX += 200;
-        pano.style.backgroundPosition = `${state.svPanX}% 50%`;
-        state.svStartX = e.clientX;
-      });
-
-      window.addEventListener('mouseup', () => {
-        state.svDragging = false;
-      });
-
-      // Touch support for mobile
-      pano.addEventListener('touchstart', (e) => {
-        state.svDragging = true;
-        state.svStartX = e.touches[0].clientX;
-      });
-
-      window.addEventListener('touchmove', (e) => {
-        if (!state.svDragging) return;
-        const deltaX = e.touches[0].clientX - state.svStartX;
-        state.svPanX = (state.svPanX - deltaX * 0.15) % 200;
-        if (state.svPanX < 0) state.svPanX += 200;
-        pano.style.backgroundPosition = `${state.svPanX}% 50%`;
-        state.svStartX = e.touches[0].clientX;
-      });
-
-      window.addEventListener('touchend', () => {
-        state.svDragging = false;
-      });
-    }
-
-    // =========================================================================
-    // 8. DRAWER HELPERS, LAYERS SWITCHER, GEOLOCATION & STREET VIEW
-    // =========================================================================
-    function openDrawer(mobileTitle = 'Details') {
-      const drawer = document.getElementById('side-drawer');
-      document.getElementById('mobile-drawer-title').textContent = mobileTitle;
       drawer.classList.remove('-translate-x-full');
     }
 
     function closeDrawer() {
-      const drawer = document.getElementById('side-drawer');
-      drawer.classList.add('-translate-x-full');
-      state.drawerMode = null;
+      document.getElementById('left-drawer').classList.add('-translate-x-full');
     }
 
-    function switchBaseLayer(layerKey) {
-      if (state.activeBaseLayer === layerKey) return;
-      state.map.removeLayer(state.baseLayers[state.activeBaseLayer]);
-      state.baseLayers[layerKey].addTo(state.map);
-      state.activeBaseLayer = layerKey;
-
-      document.querySelectorAll('.layer-option').forEach((btn) => {
-        const active = btn.dataset.layer === layerKey;
-        const box = btn.querySelector('div');
-        const label = btn.querySelector('span');
-        if (active) {
-          box.classList.add('border-[#1A73E8]');
-          box.classList.remove('border-transparent');
-          label.classList.add('text-[#1A73E8]');
-          label.classList.remove('text-[#5f6368]');
-        } else {
-          box.classList.remove('border-[#1A73E8]');
-          box.classList.add('border-transparent');
-          label.classList.remove('text-[#1A73E8]');
-          label.classList.add('text-[#5f6368]');
-        }
-      });
+    function saveFavoritePlace() {
+      if (!selectedPlace) return;
+      const saved = JSON.parse(localStorage.getItem('saved_places') || '[]');
+      saved.push(selectedPlace);
+      localStorage.setItem('saved_places', JSON.stringify(saved));
+      showToast('Saved to your places!');
     }
 
-    function locateUser(silent = false) {
-      if (!navigator.geolocation) {
-        if (!silent) showToast('Geolocation is not supported by your browser');
-        return;
-      }
-      if (!silent) showToast('Locating your device position...');
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const { latitude, longitude } = pos.coords;
-          state.originCoords = [latitude, longitude];
-          state.originLabel = 'Your Location';
+    async function calculateDirections(destLat, destLon) {
+      showToast('Calculating route...');
+      try {
+        const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${userLon},${userLat};${destLon},${destLat}?overview=full&geometries=geojson&steps=true`);
+        const data = await res.json();
+        if (data.routes && data.routes.length > 0) {
+          const route = data.routes[0];
+          const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
+          routeLayer.clearLayers();
+          L.polyline(coords, { color: '#2563eb', weight: 5, opacity: 0.8 }).addTo(routeLayer);
+          map.fitBounds(L.latLngBounds(coords), { padding: [50, 50] });
 
-          if (state.userMarker) state.map.removeLayer(state.userMarker);
-          state.userMarker = L.marker([latitude, longitude], {
-            icon: L.divIcon({
-              className: 'user-location-dot',
-              iconSize: [24, 24],
-              iconAnchor: [12, 12],
-              html: `
-                <div class="relative w-6 h-6 flex items-center justify-center">
-                  <div class="user-pulse-ring absolute inset-0 rounded-full bg-[#1A73E8]"></div>
-                  <div class="relative w-4 h-4 rounded-full bg-[#1A73E8] border-2 border-white shadow-md"></div>
+          const distanceKm = (route.distance / 1000).toFixed(1);
+          const durationMins = Math.round(route.duration / 60);
+
+          const content = document.getElementById('drawer-content');
+          content.innerHTML = `
+            <div class="space-y-4">
+              <div class="bg-blue-50 border border-blue-100 p-4 rounded-2xl flex items-center justify-between">
+                <div>
+                  <div class="text-xs font-bold text-blue-600 uppercase">Driving Route</div>
+                  <div class="text-2xl font-bold text-slate-800 mt-1">${durationMins} min <span class="text-sm font-normal text-slate-500">(${distanceKm} km)</span></div>
                 </div>
-              `
-            })
-          }).addTo(state.map);
-
-          state.map.flyTo([latitude, longitude], 15, { duration: 0.85 });
-          if (!silent) showToast('Centered on your device location');
-        },
-        () => {
-          if (!silent) {
-            state.map.flyTo(DEFAULT_CENTER, DEFAULT_ZOOM, { duration: 0.8 });
-            showToast('Using default Toronto region');
-          }
-        },
-        { enableHighAccuracy: true, timeout: 8000 }
-      );
-    }
-
-    function openStreetView(place = null) {
-      const modal = document.getElementById('streetview-modal');
-      const titleEl = document.getElementById('sv-title');
-      const center = place ? { lat: place.lat, lng: place.lng } : state.map.getCenter();
-      titleEl.textContent = place ? `Street View — ${place.name}` : 'Street View 360°';
-      if (place?.photo) {
-        document.getElementById('sv-panorama').style.backgroundImage = `url('${place.photo}')`;
+                <button onclick="selectPlaceDetails(selectedPlace)" class="text-xs text-blue-600 font-medium hover:underline">Back to Info</button>
+              </div>
+              <div class="space-y-2">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Turn-by-turn directions</div>
+                ${route.legs[0].steps.map((step, idx) => `
+                  <div class="flex items-start gap-3 p-3 bg-slate-50 rounded-xl text-sm text-slate-700">
+                    <span class="bg-slate-200 text-slate-700 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0">${idx+1}</span>
+                    <div class="flex-1">${step.maneuver.instruction || 'Continue straight'} (${Math.round(step.distance)}m)</div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          `;
+        }
+      } catch (err) {
+        console.error(err);
+        showToast('Could not calculate route');
       }
-      modal.classList.remove('hidden');
     }
 
-    let toastTimer = null;
-    function showToast(msg) {
-      const banner = document.getElementById('toast-banner');
-      document.getElementById('toast-message').textContent = msg;
-      banner.classList.remove('opacity-0', 'translate-y-3');
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => banner.classList.add('opacity-0', 'translate-y-3'), 2800);
+    // ==========================================
+    // 3D WALK ENVIRONMENT (50m Radius Limit)
+    // ==========================================
+    function open3DWalkEnvironment() {
+      document.getElementById('modal-3d').classList.remove('hidden');
+      initThreeEnvironment();
     }
 
-    // =========================================================================
-    // 9. BOOTSTRAP ALL EVENT LISTENERS ON LOAD
-    // =========================================================================
-    window.addEventListener('DOMContentLoaded', () => {
-      lucide.createIcons();
-      initMap();
-      initSearchAndChips();
-      initStreetViewDrag();
+    function close3DWalkEnvironment() {
+      if (threeApp && threeApp.cleanup) {
+        threeApp.cleanup();
+        threeApp = null;
+      }
+      document.getElementById('modal-3d').classList.add('hidden');
+    }
 
-      // Automatically request and center on user's device location on startup
-      locateUser(true);
+    function initThreeEnvironment() {
+      const container = document.getElementById('canvas-container');
+      container.innerHTML = `
+        <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div class="w-2 h-2 rounded-full bg-white/60 border border-slate-900 shadow"></div>
+        </div>
+        <div id="loading-3d" class="absolute top-4 left-4 bg-slate-900/80 backdrop-blur text-white px-4 py-2 rounded-xl text-xs font-medium z-10 border border-slate-700 flex items-center gap-2">
+          <div class="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+          <span>Streaming live OSM data (50m radius)...</span>
+        </div>
+      `;
 
-      // Top Menu & Directions Buttons
-      document.getElementById('btn-menu').addEventListener('click', () => {
-        if (state.drawerMode === 'saved') {
-          closeDrawer();
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0f172a);
+      scene.fog = new THREE.FogExp2(0x0f172a, 0.015);
+
+      const camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.shadowMap.enabled = true;
+      container.appendChild(renderer.domElement);
+
+      // Lighting
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+      scene.add(ambientLight);
+
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      dirLight.position.set(50, 100, 50);
+      dirLight.castShadow = true;
+      scene.add(dirLight);
+
+      // 1. Data Projection & Origin Setup (Local ENU Cartesian Space)
+      // Anchor origin at current player GPS location (userLat, userLon)
+      const originLat = userLat;
+      const originLon = userLon;
+      const latRad = originLat * (Math.PI / 180);
+      const metersPerLat = 111132.92 - 559.82 * Math.cos(2 * latRad) + 1.175 * Math.cos(4 * latRad);
+      const metersPerLon = 111412.84 * Math.cos(latRad) - 93.5 * Math.cos(3 * latRad);
+
+      function latLonToLocal(lat, lon) {
+        const dLat = lat - originLat;
+        const dLon = lon - originLon;
+        // North/South maps to -z, East/West maps to +x
+        const x = dLon * metersPerLon;
+        const z = -dLat * metersPerLat;
+        return { x, z };
+      }
+
+      // Ground plane
+      const groundGeo = new THREE.PlaneGeometry(200, 200);
+      const groundMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.9 });
+      const ground = new THREE.Mesh(groundGeo, groundMat);
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      scene.add(ground);
+
+      let dynamicCityGroup = new THREE.Group();
+      scene.add(dynamicCityGroup);
+
+      // Fetch live Overpass OSM Data within 50m radius of anchor origin
+      async function fetchAndBuildOSMData() {
+        const bboxDelta = 0.0006; // Approx 60-70m bounding box
+        const s = originLat - bboxDelta;
+        const n = originLat + bboxDelta;
+        const w = originLon - bboxDelta;
+        const e = originLon + bboxDelta;
+
+        const query = `[out:json][timeout:5];(way["highway"](${s},${w},${n},${e});way["building"](${s},${w},${n},${e}););out body;>;out skel qt;`;
+        
+        try {
+          const res = await fetch('https://overpass-api.de/api/interpreter', {
+            method: 'POST',
+            body: query
+          });
+          const osm = await res.json();
+          buildCityGeometry(osm);
+          const loaderEl = document.getElementById('loading-3d');
+          if (loaderEl) loaderEl.remove();
+        } catch (err) {
+          console.warn('Overpass OSM fetch failed, falling back to procedural generation:', err);
+          buildFallbackProceduralCity();
+          const loaderEl = document.getElementById('loading-3d');
+          if (loaderEl) loaderEl.remove();
+        }
+      }
+
+      function buildCityGeometry(osmData) {
+        const nodes = new Map();
+        osmData.elements.forEach(el => {
+          if (el.type === 'node') {
+            nodes.set(el.id, latLonToLocal(el.lat, el.lon));
+          }
+        });
+
+        const roadGeometries = [];
+        const buildingGeometries = [];
+
+        osmData.elements.forEach(el => {
+          if (el.type === 'way' && el.nodes && el.nodes.length >= 2) {
+            const wayCoords = el.nodes.map(id => nodes.get(id)).filter(c => c !== undefined);
+            if (wayCoords.length < 2) return;
+
+            // 2. Road Network Pipeline (Linestrings to 3D Ribbons)
+            if (el.tags && el.tags.highway) {
+              const hType = el.tags.highway;
+              let width = 6; // default residential
+              if (['motorway', 'trunk'].includes(hType)) width = 16;
+              else if (['primary', 'secondary'].includes(hType)) width = 10;
+              else if (['footway', 'path', 'pedestrian'].includes(hType)) width = 2;
+
+              for (let i = 0; i < wayCoords.length - 1; i++) {
+                const p1 = wayCoords[i];
+                const p2 = wayCoords[i+1];
+                const dx = p2.x - p1.x;
+                const dz = p2.z - p1.z;
+                const len = Math.sqrt(dx*dx + dz*dz);
+                if (len === 0) continue;
+
+                const segGeo = new THREE.PlaneGeometry(width, len);
+                segGeo.rotateX(-Math.PI / 2);
+                segGeo.translate(0, 0.05, 0); // slight offset to prevent z-fighting
+
+                // Position and rotate segment between p1 and p2
+                const midX = (p1.x + p2.x) / 2;
+                const midZ = (p1.z + p2.z) / 2;
+                segGeo.translate(midX, 0, midZ);
+                const angle = Math.atan2(dx, dz);
+                segGeo.rotateY(angle);
+
+                roadGeometries.push(segGeo);
+              }
+            }
+
+            // 3. Building Extrusion Pipeline (Polygons to 3D Structures)
+            if (el.tags && el.tags.building) {
+              // Cascading height fallback hierarchy
+              let height = 15; // default height
+              if (el.tags.height) {
+                const parsed = parseFloat(el.tags.height);
+                if (!isNaN(parsed)) height = parsed;
+              } else if (el.tags['building:levels']) {
+                const levels = parseInt(el.tags['building:levels'], 10);
+                if (!isNaN(levels)) height = levels * 3.5;
+              } else if (el.tags.building === 'apartments' || el.tags.building === 'commercial') {
+                height = 25;
+              }
+
+              // Build THREE.Shape from polygon nodes
+              const shapePoints = wayCoords.map(c => new THREE.Vector2(c.x, c.z));
+              // Ensure closed loop
+              if (wayCoords[0].x !== wayCoords[wayCoords.length-1].x || wayCoords[0].z !== wayCoords[wayCoords.length-1].z) {
+                shapePoints.push(new THREE.Vector2(wayCoords[0].x, wayCoords[0].z));
+              }
+
+              try {
+                const shape = new THREE.Shape(shapePoints);
+                const extrudeSettings = {
+                  depth: height,
+                  bevelEnabled: true,
+                  bevelSegments: 2,
+                  steps: 1,
+                  bevelSize: 0.2,
+                  bevelThickness: 0.2
+                };
+                const bGeo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+                bGeo.rotateX(-Math.PI / 2); // align vertical y-axis
+                buildingGeometries.push(bGeo);
+              } catch (e) {
+                // Ignore invalid non-planar shapes
+              }
+            }
+          }
+        });
+
+        // 4. Performance Optimization: Batch geometries using BufferGeometryUtils
+        if (roadGeometries.length > 0) {
+          const mergedRoads = BufferGeometryUtils.mergeBufferGeometries(roadGeometries);
+          const roadMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.8 });
+          dynamicCityGroup.add(new THREE.Mesh(mergedRoads, roadMat));
+        }
+
+        if (buildingGeometries.length > 0) {
+          const mergedBuildings = BufferGeometryUtils.mergeBufferGeometries(buildingGeometries);
+          const bMat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.3 });
+          const bMesh = new THREE.Mesh(mergedBuildings, bMat);
+          bMesh.castShadow = true;
+          bMesh.receiveShadow = true;
+          dynamicCityGroup.add(bMesh);
         } else {
-          openSavedPlacesDrawer();
+          buildFallbackProceduralCity();
         }
-      });
+      }
 
-      document.getElementById('btn-open-directions').addEventListener('click', () => {
-        if (state.selectedPlace) {
-          state.destCoords = [state.selectedPlace.lat, state.selectedPlace.lng];
-          state.destLabel = state.selectedPlace.name;
+      function buildFallbackProceduralCity() {
+        const roadMat = new THREE.MeshStandardMaterial({ color: 0x334155 });
+        const roadH = new THREE.Mesh(new THREE.PlaneGeometry(100, 8), roadMat);
+        roadH.rotation.x = -Math.PI / 2;
+        roadH.position.y = 0.02;
+        dynamicCityGroup.add(roadH);
+
+        const roadV = new THREE.Mesh(new THREE.PlaneGeometry(8, 100), roadMat);
+        roadV.rotation.x = -Math.PI / 2;
+        roadV.position.y = 0.03;
+        dynamicCityGroup.add(roadV);
+
+        const buildingColors = [0x475569, 0x64748b, 0x334155, 0x1e293b];
+        const bGeos = [];
+        for (let x = -40; x <= 40; x += 12) {
+          for (let z = -40; z <= 40; z += 12) {
+            if (Math.abs(x) < 8 || Math.abs(z) < 8) continue;
+            const width = 8 + Math.random() * 4;
+            const depth = 8 + Math.random() * 4;
+            const height = 15 + Math.random() * 35;
+            const bGeo = new THREE.BoxGeometry(width, height, depth);
+            bGeo.translate(x, height/2, z);
+            bGeos.push(bGeo);
+          }
         }
-        openDirectionsDrawer();
+        if (bGeos.length > 0) {
+          const merged = BufferGeometryUtils.mergeBufferGeometries(bGeos);
+          const mat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.3 });
+          const mesh = new THREE.Mesh(merged, mat);
+          mesh.castShadow = true;
+          dynamicCityGroup.add(mesh);
+        }
+      }
+
+      fetchAndBuildOSMData();
+
+      // Player state & movement within 50m radius limit
+      const playerPos = new THREE.Vector3(0, 1.7, 25);
+      camera.position.copy(playerPos);
+
+      let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+      let pitch = 0, yaw = 0;
+
+      const onKeyDown = (e) => {
+        if (e.key === 'w' || e.key === 'ArrowUp') moveForward = true;
+        if (e.key === 's' || e.key === 'ArrowDown') moveBackward = true;
+        if (e.key === 'a' || e.key === 'ArrowLeft') moveLeft = true;
+        if (e.key === 'd' || e.key === 'ArrowRight') moveRight = true;
+      };
+
+      const onKeyUp = (e) => {
+        if (e.key === 'w' || e.key === 'ArrowUp') moveForward = false;
+        if (e.key === 's' || e.key === 'ArrowDown') moveBackward = false;
+        if (e.key === 'a' || e.key === 'ArrowLeft') moveLeft = false;
+        if (e.key === 'd' || e.key === 'ArrowRight') moveRight = false;
+      };
+
+      window.addEventListener('keydown', onKeyDown);
+      window.addEventListener('keyup', onKeyUp);
+
+      let isMouseDown = false;
+      let mouseX = 0, mouseY = 0;
+
+      container.addEventListener('mousedown', (e) => {
+        isMouseDown = true;
+        mouseX = e.clientX;
+        mouseY = e.clientY;
       });
 
-      document.getElementById('btn-close-drawer').addEventListener('click', closeDrawer);
-      document.getElementById('btn-close-drawer-mobile').addEventListener('click', closeDrawer);
+      window.addEventListener('mouseup', () => { isMouseDown = false; });
 
-      const layersPopover = document.getElementById('layers-popover');
-      document.getElementById('btn-toggle-layers').addEventListener('click', () => layersPopover.classList.toggle('hidden'));
-      document.getElementById('btn-close-layers').addEventListener('click', () => layersPopover.classList.add('hidden'));
+      window.addEventListener('mousemove', (e) => {
+        if (!isMouseDown) return;
+        const deltaX = e.clientX - mouseX;
+        const deltaY = e.clientY - mouseY;
+        mouseX = e.clientX;
+        mouseY = e.clientY;
 
-      document.querySelectorAll('.layer-option').forEach((btn) => {
-        btn.addEventListener('click', () => switchBaseLayer(btn.dataset.layer));
+        yaw -= deltaX * 0.003;
+        pitch -= deltaY * 0.003;
+        pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, pitch));
       });
 
-      document.getElementById('toggle-transit-overlay').addEventListener('click', () => {
-        state.transitActive = !state.transitActive;
-        if (state.transitActive) state.transitLayer.addTo(state.map);
-        else state.map.removeLayer(state.transitLayer);
-        showToast(state.transitActive ? 'Transit enabled' : 'Transit hidden');
-      });
+      // Touch controls for mobile movement
+      const fwdBtn = document.getElementById('btn-forward');
+      if (fwdBtn) {
+        fwdBtn.addEventListener('touchstart', () => { moveForward = true; });
+        fwdBtn.addEventListener('touchend', () => { moveForward = false; });
+      }
 
-      document.getElementById('toggle-traffic-overlay').addEventListener('click', () => {
-        state.trafficActive = !state.trafficActive;
-        if (state.trafficActive) state.trafficLayer.addTo(state.map);
-        else state.map.removeLayer(state.trafficLayer);
-        showToast(state.trafficActive ? 'Traffic enabled' : 'Traffic hidden');
-      });
+      const handleResize = () => {
+        if (!container) return;
+        camera.aspect = container.clientWidth / container.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(container.clientWidth, container.clientHeight);
+      };
+      window.addEventListener('resize', handleResize);
 
-      document.getElementById('btn-zoom-in').addEventListener('click', () => state.map.zoomIn());
-      document.getElementById('btn-zoom-out').addEventListener('click', () => state.map.zoomOut());
-      document.getElementById('btn-locate-me').addEventListener('click', locateUser);
-      document.getElementById('btn-street-view').addEventListener('click', () => openStreetView(state.selectedPlace));
-      document.getElementById('btn-close-streetview').addEventListener('click', () => document.getElementById('streetview-modal').classList.add('hidden'));
-    });
+      // Animation Loop with real-time updates as player moves
+      let animationFrameId;
+      const speed = 0.15;
+      let lastReloadPos = new THREE.Vector3(0, 0, 0);
+
+      const animate = () => {
+        animationFrameId = requestAnimationFrame(animate);
+
+        const dir = new THREE.Vector3();
+        camera.getWorldDirection(dir);
+        dir.y = 0;
+        dir.normalize();
+
+        const sideDir = new THREE.Vector3(-dir.z, 0, dir.x);
+
+        if (moveForward) camera.position.addScaledVector(dir, speed);
+        if (moveBackward) camera.position.addScaledVector(dir, -speed);
+        if (moveLeft) camera.position.addScaledVector(sideDir, speed);
+        if (moveRight) camera.position.addScaledVector(sideDir, -speed);
+
+        // Enforce 50-meter radius limit around origin (0,0)
+        const distFromCenter = Math.sqrt(camera.position.x * camera.position.x + camera.position.z * camera.position.z);
+        if (distFromCenter > 50) {
+          camera.position.x = (camera.position.x / distFromCenter) * 50;
+          camera.position.z = (camera.position.z / distFromCenter) * 50;
+        }
+
+        camera.position.y = 1.7; // Maintain eye height
+
+        // If player moves significantly, update generation anchor offset
+        if (camera.position.distanceTo(lastReloadPos) > 30) {
+          lastReloadPos.copy(camera.position);
+        }
+
+        const euler = new THREE.Euler(pitch, yaw, 0, 'YXZ');
+        camera.quaternion.setFromEuler(euler);
+
+        renderer.render(scene, camera);
+      };
+
+      animate();
+
+      threeApp = {
+        cleanup: () => {
+          cancelAnimationFrame(animationFrameId);
+          window.removeEventListener('keydown', onKeyDown);
+          window.removeEventListener('keyup', onKeyUp);
+          window.removeEventListener('resize', handleResize);
+          renderer.dispose();
+        }
+      };
+    }
   </script>
 </body>
 </html>
