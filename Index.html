@@ -1,756 +1,202 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Google Maps Clone</title>
-  <!-- Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- FontAwesome for Icons -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <!-- Leaflet CSS & JS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <!-- Three.js for 3D Walk Environment -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
-    body { font-family: 'Roboto', sans-serif; }
-    #map { height: 100vh; width: 100vw; z-index: 1; }
-    .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-    .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
-    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
-    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>First-Person Template</title>
+<style>
+  :root { --ink:#f2f4f7; --panel:rgba(14,18,24,.82); --edge:rgba(255,255,255,.18); color-scheme: dark; }
+  @media (prefers-color-scheme: light) { :root { --ink:#f2f4f7; --panel:rgba(14,18,24,.82); } }
+  html, body { margin:0; height:100%; overflow:hidden; background:#9fb7c9; font-family: system-ui, sans-serif; color:var(--ink); }
+  canvas { display:block; width:100%; height:100%; }
+  #overlay { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; cursor:pointer; background:rgba(8,10,14,.45); }
+  #card { background:var(--panel); border:1px solid var(--edge); border-radius:10px; padding:22px 28px; max-width:340px; line-height:1.5; }
+  #card h1 { margin:0 0 8px; font-size:20px; }
+  #card p { margin:4px 0; font-size:14px; }
+  kbd { background:rgba(255,255,255,.14); border-radius:4px; padding:1px 6px; font-size:12px; }
+  #cross { position:fixed; left:50%; top:50%; width:4px; height:4px; margin:-2px; border-radius:50%; background:#fff; mix-blend-mode:difference; pointer-events:none; }
+  #hud { position:fixed; left:12px; bottom:calc(12px + env(safe-area-inset-bottom,0px)); font:12px ui-monospace, monospace; background:var(--panel); padding:6px 10px; border-radius:6px; pointer-events:none; }
+</style>
 </head>
-<body class="overflow-hidden bg-slate-900 text-slate-800">
+<body>
+<div id="cross"></div>
+<div id="hud"></div>
+<div id="overlay"><div id="card">
+  <h1>First-person template</h1>
+  <p>Click to capture the mouse.</p>
+  <p><kbd>W A S D</kbd> move &nbsp; <kbd>Shift</kbd> sprint</p>
+  <p><kbd>Space</kbd> jump &nbsp; <kbd>C</kbd> crouch &nbsp; <kbd>Esc</kbd> release</p>
+</div></div>
 
-  <!-- Top Floating Search & Category Bar -->
-  <div class="absolute top-4 left-4 right-4 md:left-6 md:right-auto md:w-[480px] z-[1000] flex flex-col gap-3 pointer-events-none">
-    <div class="flex items-center bg-white shadow-lg rounded-full px-4 py-2 pointer-events-auto border border-slate-200">
-      <button id="menu-btn" class="text-slate-600 hover:text-slate-900 mr-3 text-lg"><i class="fa-solid fa-bars"></i></button>
-      <input id="search-input" type="text" placeholder="Search Google Maps or address..." class="w-full bg-transparent outline-none text-slate-800 text-sm md:text-base pr-2">
-      <button id="search-btn" class="text-slate-500 hover:text-blue-600 px-2"><i class="fa-solid fa-magnifying-glass"></i></button>
-      <div class="h-6 w-[1px] bg-slate-300 mx-2"></div>
-      <button id="directions-trigger-btn" class="text-blue-600 hover:text-blue-700 px-2" title="Directions"><i class="fa-solid fa-diamond-turn-right text-lg"></i></button>
-    </div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ================= CONFIG: tweak these ================= */
+const CFG = {
+  walkSpeed: 5, sprintSpeed: 8.5, crouchSpeed: 2.5,
+  groundAccel: 60,   // how fast you reach target speed on ground
+  airControl: 0.25,  // fraction of accel while airborne
+  jumpSpeed: 7.5, gravity: 22,
+  standHeight: 1.8, crouchHeight: 1.1, eyeOffset: 0.15, // eye = top of body - eyeOffset
+  radius: 0.35,
+  sensitivity: 0.0022, maxPitch: 89 * Math.PI / 180,
+  fov: 75, sprintFovBoost: 8,
+  bobAmount: 0.05, bobSpeed: 9
+};
 
-    <!-- Category Chips -->
-    <div class="flex items-center gap-2 overflow-x-auto pb-1 pointer-events-auto custom-scrollbar no-scrollbar">
-      <button onclick="searchCategory('restaurant')" class="flex items-center gap-2 bg-white hover:bg-slate-50 shadow-md px-4 py-2 rounded-full text-xs font-medium text-slate-700 whitespace-nowrap border border-slate-100 transition"><i class="fa-solid fa-utensils text-red-500"></i> Restaurants</button>
-      <button onclick="searchCategory('cafe')" class="flex items-center gap-2 bg-white hover:bg-slate-50 shadow-md px-4 py-2 rounded-full text-xs font-medium text-slate-700 whitespace-nowrap border border-slate-100 transition"><i class="fa-solid fa-mug-hot text-amber-600"></i> Coffee</button>
-      <button onclick="searchCategory('hotel')" class="flex items-center gap-2 bg-white hover:bg-slate-50 shadow-md px-4 py-2 rounded-full text-xs font-medium text-slate-700 whitespace-nowrap border border-slate-100 transition"><i class="fa-solid fa-hotel text-blue-500"></i> Hotels</button>
-      <button onclick="searchCategory('park')" class="flex items-center gap-2 bg-white hover:bg-slate-50 shadow-md px-4 py-2 rounded-full text-xs font-medium text-slate-700 whitespace-nowrap border border-slate-100 transition"><i class="fa-solid fa-tree text-green-600"></i> Parks</button>
-      <button onclick="searchCategory('transit')" class="flex items-center gap-2 bg-white hover:bg-slate-50 shadow-md px-4 py-2 rounded-full text-xs font-medium text-slate-700 whitespace-nowrap border border-slate-100 transition"><i class="fa-solid fa-train text-purple-600"></i> Transit</button>
-    </div>
-  </div>
+/* ================= Scene ================= */
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x9fb7c9);
+scene.fog = new THREE.Fog(0x9fb7c9, 25, 90);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 0.9));
+const sun = new THREE.DirectionalLight(0xffffff, 0.6); sun.position.set(10, 20, 5); scene.add(sun);
 
-  <!-- Autocomplete Results Dropdown -->
-  <div id="autocomplete-results" class="absolute top-20 left-4 md:left-6 md:w-[480px] bg-white shadow-xl rounded-2xl z-[1000] hidden overflow-hidden border border-slate-200"></div>
+const camera = new THREE.PerspectiveCamera(CFG.fov, 1, 0.05, 200);
+camera.rotation.order = 'YXZ';   // yaw first, then pitch: no roll
 
-  <!-- Left Sliding Drawer for Place Details / Directions -->
-  <div id="left-drawer" class="absolute top-0 left-0 w-full md:w-[420px] h-full bg-white shadow-2xl z-[1001] transform -translate-x-full transition-transform duration-300 flex flex-col">
-    <!-- Drawer Header -->
-    <div class="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
-      <div class="flex items-center gap-3">
-        <button id="close-drawer" class="text-slate-500 hover:text-slate-800 text-lg w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-200"><i class="fa-solid fa-arrow-left"></i></button>
-        <h2 id="drawer-title" class="font-bold text-slate-800 text-lg">Location Details</h2>
-      </div>
-      <button id="close-drawer-x" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-xl"></i></button>
-    </div>
-    <!-- Drawer Body -->
-    <div id="drawer-content" class="flex-1 overflow-y-auto p-5 custom-scrollbar space-y-4">
-      <!-- Dynamically populated place details or directions panel -->
-    </div>
-  </div>
+/* ================= World (replace with your level) ================= */
+const solids = [];               // collision boxes (THREE.Box3)
+function addBox(x, y, z, w, h, d, color) { // x,z = center; y = bottom
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color }));
+  m.position.set(x, y + h / 2, z); scene.add(m);
+  solids.push(new THREE.Box3().setFromObject(m));
+}
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshLambertMaterial({ color: 0x6f8f6a }));
+floor.rotation.x = -Math.PI / 2; scene.add(floor);
+scene.add(new THREE.GridHelper(200, 100, 0x000000, 0x000000).translateY(0.01));
+scene.children[scene.children.length - 1].material.opacity = 0.12;
+scene.children[scene.children.length - 1].material.transparent = true;
+addBox(0, 0, -8, 6, 1, 3, 0xc98f5a);       // low step
+addBox(0, 0, -12, 4, 2.2, 3, 0xb9744a);    // high step
+addBox(8, 0, -4, 2, 4, 10, 0x8a8fa8);      // wall
+addBox(-8, 0, -6, 3, 0.5, 3, 0xd9c36a);
+addBox(-8, 0, -10, 3, 1.5, 3, 0xd9a05a);
+addBox(-8, 0, -14, 3, 2.5, 3, 0xd97a5a);   // staircase of jumps
 
-  <!-- Map Container -->
-  <div id="map"></div>
+/* ================= Player state ================= */
+const player = {
+  pos: new THREE.Vector3(0, 0, 6),   // feet position
+  vel: new THREE.Vector3(),
+  yaw: 0, pitch: 0,
+  height: CFG.standHeight,
+  grounded: false, bob: 0, fov: CFG.fov
+};
 
-  <!-- Bottom-Right Floating Controls (Layers, GPS, 3D Walk) -->
-  <div class="absolute bottom-8 right-4 md:right-8 z-[1000] flex flex-col gap-3">
-    <!-- 3D Walk Mode Trigger Button -->
-    <button onclick="open3DWalkEnvironment()" class="bg-blue-600 hover:bg-blue-700 text-white shadow-lg w-12 h-12 rounded-2xl flex items-center justify-center text-xl transition transform hover:scale-105" title="Enter 3D Walk Mode (50m Radius)"><i class="fa-solid fa-vr-cardboard"></i></button>
-    <!-- Layers Picker -->
-    <div class="relative">
-      <button id="layers-btn" class="bg-white hover:bg-slate-50 text-slate-700 shadow-lg w-12 h-12 rounded-2xl flex items-center justify-center text-lg border border-slate-200 transition"><i class="fa-solid fa-layer-group"></i></button>
-      <div id="layers-menu" class="absolute bottom-14 right-0 bg-white shadow-xl rounded-2xl p-3 hidden w-48 border border-slate-200 space-y-2">
-        <div class="text-xs font-bold text-slate-400 uppercase tracking-wider px-2">Map Type</div>
-        <button onclick="setMapLayer('default')" class="w-full text-left px-3 py-2 rounded-xl text-sm font-medium hover:bg-slate-100 flex items-center gap-2 text-slate-700"><i class="fa-solid fa-map text-blue-500"></i> Default</button>
-        <button onclick="setMapLayer('satellite')" class="w-full text-left px-3 py-2 rounded-xl text-sm font-medium hover:bg-slate-100 flex items-center gap-2 text-slate-700"><i class="fa-solid fa-earth-americas text-green-600"></i> Satellite</button>
-        <button onclick="setMapLayer('terrain')" class="w-full text-left px-3 py-2 rounded-xl text-sm font-medium hover:bg-slate-100 flex items-center gap-2 text-slate-700"><i class="fa-solid fa-mountain text-amber-600"></i> Terrain</button>
-        <button onclick="setMapLayer('dark')" class="w-full text-left px-3 py-2 rounded-xl text-sm font-medium hover:bg-slate-100 flex items-center gap-2 text-slate-700"><i class="fa-solid fa-moon text-indigo-600"></i> Dark Mode</button>
-        <div class="border-t border-slate-100 pt-2">
-          <label class="flex items-center gap-2 px-2 text-sm font-medium text-slate-700 cursor-pointer">
-            <input type="checkbox" id="transit-toggle" onchange="toggleTransit(this.checked)" class="rounded text-blue-600 focus:ring-blue-500"> Transit Overlays
-          </label>
-        </div>
-      </div>
-    </div>
-    <!-- GPS Locate Me Button -->
-    <button id="locate-btn" class="bg-white hover:bg-slate-50 text-slate-700 shadow-lg w-12 h-12 rounded-2xl flex items-center justify-center text-lg border border-slate-200 transition" title="Locate Me"><i class="fa-solid fa-location-crosshairs text-blue-600"></i></button>
-  </div>
+/* ================= Input ================= */
+const keys = {};
+addEventListener('keydown', e => { keys[e.code] = true; if (e.code === 'Space') e.preventDefault(); });
+addEventListener('keyup',   e => { keys[e.code] = false; });
+addEventListener('blur',    () => { for (const k in keys) keys[k] = false; });
 
-  <!-- 3D Walk Environment Modal -->
-  <div id="modal-3d" class="fixed inset-0 z-[2000] bg-slate-950/90 hidden flex flex-col">
-    <!-- 3D Top Header Bar -->
-    <div class="flex items-center justify-between px-6 py-4 bg-slate-900 border-b border-slate-800 text-white">
-      <div class="flex items-center gap-3">
-        <div class="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-        <div>
-          <h2 class="font-bold text-lg">3D Walk Mode <span class="text-xs bg-blue-600 px-2 py-0.5 rounded-full ml-2">50m Radius</span></h2>
-          <p class="text-xs text-slate-400">Procedural 3D reconstruction around your GPS location</p>
-        </div>
-      </div>
-      <div class="flex items-center gap-4">
-        <div class="hidden md:flex items-center gap-2 text-xs text-slate-300 bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
-          <span><kbd class="bg-slate-700 px-1.5 py-0.5 rounded">W A S D</kbd> / <kbd class="bg-slate-700 px-1.5 py-0.5 rounded">Arrows</kbd> to Move</span>
-          <span class="mx-2">|</span>
-          <span><kbd class="bg-slate-700 px-1.5 py-0.5 rounded">Mouse Drag</kbd> to Look</span>
-        </div>
-        <button onclick="close3DWalkEnvironment()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-xl text-sm font-medium transition border border-slate-700"><i class="fa-solid fa-xmark mr-2"></i> Exit 3D</button>
-      </div>
-    </div>
-    <!-- Canvas Container -->
-    <div id="canvas-container" class="flex-1 relative cursor-grab active:cursor-grabbing">
-      <!-- Crosshair -->
-      <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div class="w-2 h-2 rounded-full bg-white/60 border border-slate-900 shadow"></div>
-      </div>
-      <!-- Controls HUD for Mobile / Touch -->
-      <div class="absolute bottom-6 left-1/2 transform -translate-x-1/2 md:hidden flex gap-3 z-10">
-        <button id="btn-forward" class="bg-white/20 backdrop-blur text-white px-4 py-3 rounded-xl font-bold text-lg active:bg-white/40"><i class="fa-solid fa-arrow-up"></i></button>
-      </div>
-    </div>
-  </div>
+const overlay = document.getElementById('overlay');
+let locked = false, dragLook = false;
+function look(dx, dy) {
+  player.yaw   -= dx * CFG.sensitivity;
+  player.pitch  = Math.max(-CFG.maxPitch, Math.min(CFG.maxPitch, player.pitch - dy * CFG.sensitivity));
+}
+overlay.addEventListener('click', () => {
+  overlay.style.display = 'none';
+  try { renderer.domElement.requestPointerLock(); } catch (e) {}
+  setTimeout(() => { if (!locked) dragLook = true; }, 300); // fallback if pointer lock is blocked
+});
+document.addEventListener('pointerlockchange', () => {
+  locked = document.pointerLockElement === renderer.domElement;
+  if (locked) dragLook = false; else if (!dragLook) overlay.style.display = 'flex';
+});
+addEventListener('mousemove', e => {
+  if (locked) look(e.movementX, e.movementY);
+  else if (dragLook && e.buttons) look(e.movementX, e.movementY);
+});
+addEventListener('keydown', e => { if (e.code === 'Escape' && dragLook) { dragLook = false; overlay.style.display = 'flex'; } });
 
-  <!-- Notification Toast -->
-  <div id="toast" class="fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-slate-900/90 backdrop-blur text-white px-5 py-3 rounded-2xl shadow-2xl z-[3000] hidden text-sm font-medium transition-all"></div>
-
-  <!-- JavaScript Application Logic -->
-  <script>
-    let map, userLat = 43.6532, userLon = -79.3832; // Default Toronto center
-    let baseLayers = {}, currentLayerKey = 'default', transitLayer = null;
-    let markersLayer = L.layerGroup(), routeLayer = L.layerGroup();
-    let selectedPlace = null;
-    let threeApp = null; // Holds 3D scene cleanup handler
-
-    // Initialize Map on Load
-    window.addEventListener('DOMContentLoaded', () => {
-      initMap();
-      setupEventListeners();
-      getUserLocation(true);
-    });
-
-    function showToast(msg, duration = 3000) {
-      const toast = document.getElementById('toast');
-      toast.textContent = msg;
-      toast.classList.remove('hidden');
-      setTimeout(() => toast.classList.add('hidden'), duration);
+/* ================= Movement + collision ================= */
+function overlaps(b) {
+  const p = player.pos, r = CFG.radius;
+  return p.x + r > b.min.x && p.x - r < b.max.x &&
+         p.y + player.height > b.min.y && p.y < b.max.y &&
+         p.z + r > b.min.z && p.z - r < b.max.z;
+}
+// Move one axis at a time, then push out of anything we hit.
+function moveAxis(axis, amount) {
+  player.pos[axis] += amount;
+  for (const b of solids) {
+    if (!overlaps(b)) continue;
+    if (axis === 'y') {
+      if (amount <= 0) { player.pos.y = b.max.y; player.grounded = true; }
+      else player.pos.y = b.min.y - player.height;
+      player.vel.y = 0;
+    } else {
+      player.pos[axis] = amount > 0 ? b.min[axis] - CFG.radius : b.max[axis] + CFG.radius;
+      player.vel[axis] = 0;
     }
-
-    function initMap() {
-      map = L.map('map', { zoomControl: false }).setView([userLat, userLon], 14);
-
-      // Define Esri keyless tile layers
-      baseLayers.default = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
-        attribution: 'Tiles &copy; Esri', maxZoom: 19
-      });
-      baseLayers.satellite = L.layerGroup([
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri', maxZoom: 19 }),
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { attribution: 'Labels &copy; Esri', maxZoom: 19, opacity: 0.9 })
-      ]);
-      baseLayers.terrain = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
-        attribution: 'Tiles &copy; Esri', maxZoom: 19
-      });
-      baseLayers.dark = L.layerGroup([
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri', maxZoom: 16 }),
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', { attribution: 'Labels &copy; Esri', maxZoom: 16 })
-      ]);
-
-      baseLayers.default.addTo(map);
-      markersLayer.addTo(map);
-      routeLayer.addTo(map);
-
-      // Add Zoom Control to Bottom Right
-      L.control.zoom({ position: 'bottomright' }).addTo(map);
-    }
-
-    function setMapLayer(key) {
-      if (baseLayers[currentLayerKey]) map.removeLayer(baseLayers[currentLayerKey]);
-      currentLayerKey = key;
-      if (baseLayers[key]) baseLayers[key].addTo(map);
-      document.getElementById('layers-menu').classList.add('hidden');
-      showToast(`Switched to ${key} map`);
-    }
-
-    function toggleTransit(enabled) {
-      if (enabled) {
-        transitLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
-          attribution: 'Transportation &copy; Esri', opacity: 0.8, maxZoom: 19
-        });
-        transitLayer.addTo(map);
-        showToast('Transit layer enabled');
-      } else if (transitLayer) {
-        map.removeLayer(transitLayer);
-        transitLayer = null;
-        showToast('Transit layer disabled');
-      }
-    }
-
-    function setupEventListeners() {
-      document.getElementById('layers-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        const menu = document.getElementById('layers-menu');
-        menu.classList.toggle('hidden');
-      });
-
-      document.addEventListener('click', () => {
-        document.getElementById('layers-menu').classList.add('hidden');
-        document.getElementById('autocomplete-results').classList.add('hidden');
-      });
-
-      document.getElementById('locate-btn').addEventListener('click', () => getUserLocation(false));
-
-      document.getElementById('close-drawer').addEventListener('click', closeDrawer);
-      document.getElementById('close-drawer-x').addEventListener('click', closeDrawer);
-
-      const searchInput = document.getElementById('search-input');
-      searchInput.addEventListener('input', debounce(async (e) => {
-        const query = e.target.value.trim();
-        if (query.length < 2) {
-          document.getElementById('autocomplete-results').classList.add('hidden');
-          return;
-        }
-        try {
-          const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`);
-          const data = await res.json();
-          renderAutocomplete(data);
-        } catch (err) {
-          console.error(err);
-        }
-      }, 300));
-
-      searchInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          performSearch(searchInput.value);
-          document.getElementById('autocomplete-results').classList.add('hidden');
-        }
-      });
-
-      document.getElementById('search-btn').addEventListener('click', () => {
-        performSearch(searchInput.value);
-        document.getElementById('autocomplete-results').classList.add('hidden');
-      });
-    }
-
-    function debounce(func, wait) {
-      let timeout;
-      return function(...args) {
-        clearTimeout(timeout);
-        timeout = setTimeout(() => func.apply(this, args), wait);
-      };
-    }
-
-    function getUserLocation(initial = false) {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition((pos) => {
-          userLat = pos.coords.latitude;
-          userLon = pos.coords.longitude;
-          map.setView([userLat, userLon], 15);
-          
-          // Add User Marker
-          L.marker([userLat, userLon], {
-            icon: L.divIcon({
-              className: 'custom-user-pin',
-              html: '<div class="w-6 h-6 bg-blue-600 rounded-full border-4 border-white shadow-lg animate-pulse"></div>',
-              iconSize: [24, 24],
-              iconAnchor: [12, 12]
-            })
-          }).addTo(map).bindPopup('<b>You are here</b>');
-
-          if (!initial) showToast('Centered on your device location');
-        }, (err) => {
-          console.warn('Geolocation denied or unavailable:', err);
-          if (!initial) showToast('Could not fetch device location. Using default.');
-        }, { enableHighAccuracy: true });
-      }
-    }
-
-    async function performSearch(query) {
-      if (!query) return;
-      showToast(`Searching for "${query}"...`);
-      try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=10`);
-        const data = await res.json();
-        if (data && data.length > 0) {
-          markersLayer.clearLayers();
-          const first = data[0];
-          const lat = parseFloat(first.lat);
-          const lon = parseFloat(first.lon);
-          map.setView([lat, lon], 15);
-
-          data.forEach(item => {
-            const mLat = parseFloat(item.lat);
-            const mLon = parseFloat(item.lon);
-            const marker = L.marker([mLat, mLon]).addTo(markersLayer);
-            marker.on('click', () => selectPlaceDetails({
-              name: item.display_name.split(',')[0],
-              address: item.display_name,
-              lat: mLat,
-              lon: mLon,
-              type: item.type || 'Location'
-            }));
-          });
-
-          selectPlaceDetails({
-            name: first.display_name.split(',')[0],
-            address: first.display_name,
-            lat,
-            lon,
-            type: first.type || 'Location'
-          });
-        } else {
-          showToast('No locations found');
-        }
-      } catch (err) {
-        console.error(err);
-        showToast('Search failed');
-      }
-    }
-
-    function renderAutocomplete(results) {
-      const container = document.getElementById('autocomplete-results');
-      if (!results || results.length === 0) {
-        container.classList.add('hidden');
-        return;
-      }
-      container.innerHTML = results.map(item => `
-        <div class="px-4 py-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-none flex items-center gap-3 text-sm text-slate-700" onclick="selectAutocompleteItem(${item.lat}, ${item.lon}, '${encodeURIComponent(item.display_name)}')">
-          <i class="fa-solid fa-location-dot text-slate-400"></i>
-          <span class="truncate">${item.display_name}</span>
-        </div>
-      `).join('');
-      container.classList.remove('hidden');
-    }
-
-    function selectAutocompleteItem(lat, lon, encodedName) {
-      const name = decodeURIComponent(encodedName);
-      document.getElementById('search-input').value = name;
-      document.getElementById('autocomplete-results').classList.add('hidden');
-      map.setView([lat, lon], 16);
-      markersLayer.clearLayers();
-      L.marker([lat, lon]).addTo(markersLayer);
-      selectPlaceDetails({ name: name.split(',')[0], address: name, lat, lon, type: 'Selected Place' });
-    }
-
-    async function searchCategory(category) {
-      showToast(`Searching nearby ${category}s...`);
-      try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${category}&bounded=1&viewbox=${userLon-0.05},${userLat+0.05},${userLon+0.05},${userLat-0.05}&limit=12`);
-        const data = await res.json();
-        markersLayer.clearLayers();
-        if (data && data.length > 0) {
-          const group = [];
-          data.forEach(item => {
-            const lat = parseFloat(item.lat);
-            const lon = parseFloat(item.lon);
-            const marker = L.marker([lat, lon]).addTo(markersLayer);
-            group.push([lat, lon]);
-            marker.on('click', () => selectPlaceDetails({
-              name: item.display_name.split(',')[0],
-              address: item.display_name,
-              lat, lon, type: category
-            }));
-          });
-          map.fitBounds(L.latLngBounds(group), { padding: [50, 50] });
-          showToast(`Found ${data.length} ${category}s nearby`);
-        } else {
-          showToast(`No ${category}s found nearby`);
-        }
-      } catch (err) {
-        console.error(err);
-        showToast('Category search failed');
-      }
-    }
-
-    function selectPlaceDetails(place) {
-      selectedPlace = place;
-      const drawer = document.getElementById('left-drawer');
-      const content = document.getElementById('drawer-content');
-      document.getElementById('drawer-title').textContent = place.name;
-
-      content.innerHTML = `
-        <div class="space-y-4">
-          <div class="h-48 rounded-2xl overflow-hidden shadow bg-slate-100 relative">
-            <img src="https://placehold.co/600x400/e2e8f0/475569?text=${encodeURIComponent(place.name)}" alt="${place.name}" class="w-full h-full object-cover">
-            <div class="absolute bottom-3 left-3 bg-black/60 backdrop-blur text-white text-xs px-3 py-1 rounded-full font-medium">⭐ 4.6 (128 reviews)</div>
-          </div>
-          <div>
-            <span class="text-xs font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg">${place.type}</span>
-            <h1 class="text-xl font-bold text-slate-800 mt-2">${place.name}</h1>
-            <p class="text-sm text-slate-500 mt-1"><i class="fa-solid fa-location-dot text-red-500 mr-2"></i>${place.address}</p>
-          </div>
-          <div class="flex gap-3 pt-2">
-            <button onclick="calculateDirections(${place.lat}, ${place.lon})" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-medium text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 transition"><i class="fa-solid fa-diamond-turn-right"></i> Directions</button>
-            <button onclick="saveFavoritePlace()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-3 rounded-xl font-medium text-sm transition"><i class="fa-regular fa-bookmark"></i></button>
-          </div>
-          <div class="border-t border-slate-100 pt-4 space-y-3">
-            <div class="flex items-center gap-3 text-sm text-slate-600"><i class="fa-solid fa-clock text-slate-400 w-5"></i> Open ⋅ Closes 10:00 PM</div>
-            <div class="flex items-center gap-3 text-sm text-slate-600"><i class="fa-solid fa-phone text-slate-400 w-5"></i> +1 (555) 019-2834</div>
-            <div class="flex items-center gap-3 text-sm text-slate-600"><i class="fa-solid fa-globe text-slate-400 w-5"></i> https://www.openstreetmap.org</div>
-          </div>
-        </div>
-      `;
-      drawer.classList.remove('-translate-x-full');
-    }
-
-    function closeDrawer() {
-      document.getElementById('left-drawer').classList.add('-translate-x-full');
-    }
-
-    function saveFavoritePlace() {
-      if (!selectedPlace) return;
-      const saved = JSON.parse(localStorage.getItem('saved_places') || '[]');
-      saved.push(selectedPlace);
-      localStorage.setItem('saved_places', JSON.stringify(saved));
-      showToast('Saved to your places!');
-    }
-
-    async function calculateDirections(destLat, destLon) {
-      showToast('Calculating route...');
-      try {
-        const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${userLon},${userLat};${destLon},${destLat}?overview=full&geometries=geojson&steps=true`);
-        const data = await res.json();
-        if (data.routes && data.routes.length > 0) {
-          const route = data.routes[0];
-          const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
-          routeLayer.clearLayers();
-          L.polyline(coords, { color: '#2563eb', weight: 5, opacity: 0.8 }).addTo(routeLayer);
-          map.fitBounds(L.latLngBounds(coords), { padding: [50, 50] });
-
-          const distanceKm = (route.distance / 1000).toFixed(1);
-          const durationMins = Math.round(route.duration / 60);
-
-          const content = document.getElementById('drawer-content');
-          content.innerHTML = `
-            <div class="space-y-4">
-              <div class="bg-blue-50 border border-blue-100 p-4 rounded-2xl flex items-center justify-between">
-                <div>
-                  <div class="text-xs font-bold text-blue-600 uppercase">Driving Route</div>
-                  <div class="text-2xl font-bold text-slate-800 mt-1">${durationMins} min <span class="text-sm font-normal text-slate-500">(${distanceKm} km)</span></div>
-                </div>
-                <button onclick="selectPlaceDetails(selectedPlace)" class="text-xs text-blue-600 font-medium hover:underline">Back to Info</button>
-              </div>
-              <div class="space-y-2">
-                <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Turn-by-turn directions</div>
-                ${route.legs[0].steps.map((step, idx) => `
-                  <div class="flex items-start gap-3 p-3 bg-slate-50 rounded-xl text-sm text-slate-700">
-                    <span class="bg-slate-200 text-slate-700 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0">${idx+1}</span>
-                    <div class="flex-1">${step.maneuver.instruction || 'Continue straight'} (${Math.round(step.distance)}m)</div>
-                  </div>
-                `).join('')}
-              </div>
-            </div>
-          `;
-        }
-      } catch (err) {
-        console.error(err);
-        showToast('Could not calculate route');
-      }
-    }
-
-    // ==========================================
-    // 3D WALK ENVIRONMENT (50m Radius Limit)
-    // ==========================================
-    function open3DWalkEnvironment() {
-      document.getElementById('modal-3d').classList.remove('hidden');
-      initThreeEnvironment();
-    }
-
-    function close3DWalkEnvironment() {
-      if (threeApp && threeApp.cleanup) {
-        threeApp.cleanup();
-        threeApp = null;
-      }
-      document.getElementById('modal-3d').classList.add('hidden');
-    }
-
-    function initThreeEnvironment() {
-      const container = document.getElementById('canvas-container');
-      container.innerHTML = `
-        <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div class="w-2 h-2 rounded-full bg-white/60 border border-slate-900 shadow"></div>
-        </div>
-        <div id="loading-3d" class="absolute top-4 left-4 bg-slate-900/80 backdrop-blur text-white px-4 py-2 rounded-xl text-xs font-medium z-10 border border-slate-700 flex items-center gap-2">
-          <div class="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-          <span>Streaming live OSM data (50m radius)...</span>
-        </div>
-      `;
-
-      const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x0f172a);
-      scene.fog = new THREE.FogExp2(0x0f172a, 0.015);
-
-      const camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
-      const renderer = new THREE.WebGLRenderer({ antialias: true });
-      renderer.setSize(container.clientWidth, container.clientHeight);
-      renderer.shadowMap.enabled = true;
-      container.appendChild(renderer.domElement);
-
-      // Lighting
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-      scene.add(ambientLight);
-
-      const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-      dirLight.position.set(50, 100, 50);
-      dirLight.castShadow = true;
-      scene.add(dirLight);
-
-      // 1. Data Projection & Origin Setup (Local ENU Cartesian Space)
-      // Anchor origin at current player GPS location (userLat, userLon)
-      const originLat = userLat;
-      const originLon = userLon;
-      const latRad = originLat * (Math.PI / 180);
-      const metersPerLat = 111132.92 - 559.82 * Math.cos(2 * latRad) + 1.175 * Math.cos(4 * latRad);
-      const metersPerLon = 111412.84 * Math.cos(latRad) - 93.5 * Math.cos(3 * latRad);
-
-      function latLonToLocal(lat, lon) {
-        const dLat = lat - originLat;
-        const dLon = lon - originLon;
-        // North/South maps to -z, East/West maps to +x
-        const x = dLon * metersPerLon;
-        const z = -dLat * metersPerLat;
-        return { x, z };
-      }
-
-      // Ground plane
-      const groundGeo = new THREE.PlaneGeometry(200, 200);
-      
-      // Create a dynamic canvas texture using map tiles
-      const canvasTex = document.createElement('canvas');
-      canvasTex.width = 1024;
-      canvasTex.height = 1024;
-      const ctx = canvasTex.getContext('2d');
-      
-      // Draw grid / map tile representation
-      ctx.fillStyle = '#cbd5e1';
-      ctx.fillRect(0, 0, 1024, 1024);
-      ctx.strokeStyle = '#94a3b8';
-      ctx.lineWidth = 4;
-      for(let i=0; i<=1024; i+=128) {
-        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 1024); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(1024, i); ctx.stroke();
-      }
-      // Draw center marker
-      ctx.fillStyle = '#2563eb';
-      ctx.beginPath(); ctx.arc(512, 512, 16, 0, Math.PI*2); ctx.fill();
-
-      const groundTexture = new THREE.CanvasTexture(canvasTex);
-      groundTexture.wrapS = THREE.RepeatWrapping;
-      groundTexture.wrapT = THREE.RepeatWrapping;
-      groundTexture.repeat.set(4, 4);
-
-      const groundMat = new THREE.MeshStandardMaterial({ 
-        map: groundTexture, 
-        roughness: 0.8 
-      });
-      const ground = new THREE.Mesh(groundGeo, groundMat);
-      ground.rotation.x = -Math.PI / 2;
-      ground.receiveShadow = true;
-      scene.add(ground);
-
-      let dynamicCityGroup = new THREE.Group();
-      scene.add(dynamicCityGroup);
-
-      // Build robust procedural city environment (guaranteed performance and 100% reliability)
-      function fetchAndBuildOSMData() {
-        buildProceduralCityGrid();
-        const loaderEl = document.getElementById('loading-3d');
-        if (loaderEl) loaderEl.remove();
-        showToast('Generated 3D city within 50m radius');
-      }
-
-      // Fetch live Overpass OSM Data within 50m radius of anchor origin
-      async function fetchAndBuildOSMData() {
-        // Use robust procedural generation immediately to avoid Overpass 502/504 Bad Gateway errors
-        buildFallbackProceduralCity();
-        const loaderEl = document.getElementById('loading-3d');
-        if (loaderEl) loaderEl.remove();
-      }
-
-      function buildCityGeometry(osmData) {
-        buildFallbackProceduralCity();
-      }
-
-      function buildFallbackProceduralCity() {
-        const roadMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.8 });
-        const roadH = new THREE.Mesh(new THREE.PlaneGeometry(100, 8), roadMat);
-        roadH.rotation.x = -Math.PI / 2;
-        roadH.position.y = 0.02;
-        dynamicCityGroup.add(roadH);
-
-        const roadV = new THREE.Mesh(new THREE.PlaneGeometry(8, 100), roadMat);
-        roadV.rotation.x = -Math.PI / 2;
-        roadV.position.y = 0.03;
-        dynamicCityGroup.add(roadV);
-
-        const bGeos = [];
-        for (let x = -40; x <= 40; x += 12) {
-          for (let z = -40; z <= 40; z += 12) {
-            if (Math.abs(x) < 8 || Math.abs(z) < 8) continue;
-            const width = 8 + Math.random() * 4;
-            const depth = 8 + Math.random() * 4;
-            const height = 15 + Math.random() * 35;
-            const bGeo = new THREE.BoxGeometry(width, height, depth);
-            bGeo.translate(x, height/2, z);
-            bGeos.push(bGeo);
-          }
-        }
-        
-        // Safely merge geometries or add as group to avoid any BufferGeometryUtils errors
-        try {
-          if (typeof THREE.BufferGeometryUtils !== 'undefined' && typeof THREE.BufferGeometryUtils.mergeGeometries === 'function') {
-            const merged = THREE.BufferGeometryUtils.mergeGeometries(bGeos);
-            const mat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.3 });
-            const mesh = new THREE.Mesh(merged, mat);
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            dynamicCityGroup.add(mesh);
-          } else {
-            const mat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.3 });
-            bGeos.forEach(g => {
-              const mesh = new THREE.Mesh(g, mat);
-              mesh.castShadow = true;
-              mesh.receiveShadow = true;
-              dynamicCityGroup.add(mesh);
-            });
-          }
-        } catch (e) {
-          const mat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.3 });
-          bGeos.forEach(g => {
-            const mesh = new THREE.Mesh(g, mat);
-            dynamicCityGroup.add(mesh);
-          });
-        }
-      }
-
-      fetchAndBuildOSMData();
-
-      // Player state & movement within 50m radius limit
-      const playerPos = new THREE.Vector3(0, 1.7, 25);
-      camera.position.copy(playerPos);
-
-      let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
-      let pitch = 0, yaw = 0;
-
-      const onKeyDown = (e) => {
-        if (e.key === 'w' || e.key === 'ArrowUp') moveForward = true;
-        if (e.key === 's' || e.key === 'ArrowDown') moveBackward = true;
-        if (e.key === 'a' || e.key === 'ArrowLeft') moveLeft = true;
-        if (e.key === 'd' || e.key === 'ArrowRight') moveRight = true;
-      };
-
-      const onKeyUp = (e) => {
-        if (e.key === 'w' || e.key === 'ArrowUp') moveForward = false;
-        if (e.key === 's' || e.key === 'ArrowDown') moveBackward = false;
-        if (e.key === 'a' || e.key === 'ArrowLeft') moveLeft = false;
-        if (e.key === 'd' || e.key === 'ArrowRight') moveRight = false;
-      };
-
-      window.addEventListener('keydown', onKeyDown);
-      window.addEventListener('keyup', onKeyUp);
-
-      let isMouseDown = false;
-      let mouseX = 0, mouseY = 0;
-
-      container.addEventListener('mousedown', (e) => {
-        isMouseDown = true;
-        mouseX = e.clientX;
-        mouseY = e.clientY;
-      });
-
-      window.addEventListener('mouseup', () => { isMouseDown = false; });
-
-      window.addEventListener('mousemove', (e) => {
-        if (!isMouseDown) return;
-        const deltaX = e.clientX - mouseX;
-        const deltaY = e.clientY - mouseY;
-        mouseX = e.clientX;
-        mouseY = e.clientY;
-
-        yaw -= deltaX * 0.003;
-        pitch -= deltaY * 0.003;
-        pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, pitch));
-      });
-
-      // Touch controls for mobile movement
-      const fwdBtn = document.getElementById('btn-forward');
-      if (fwdBtn) {
-        fwdBtn.addEventListener('touchstart', () => { moveForward = true; });
-        fwdBtn.addEventListener('touchend', () => { moveForward = false; });
-      }
-
-      const handleResize = () => {
-        if (!container) return;
-        camera.aspect = container.clientWidth / container.clientHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(container.clientWidth, container.clientHeight);
-      };
-      window.addEventListener('resize', handleResize);
-
-      // Animation Loop with real-time updates as player moves
-      let animationFrameId;
-      const speed = 0.15;
-      let lastReloadPos = new THREE.Vector3(0, 0, 0);
-
-      const animate = () => {
-        animationFrameId = requestAnimationFrame(animate);
-
-        const dir = new THREE.Vector3();
-        camera.getWorldDirection(dir);
-        dir.y = 0;
-        dir.normalize();
-
-        const sideDir = new THREE.Vector3(-dir.z, 0, dir.x);
-
-        if (moveForward) camera.position.addScaledVector(dir, speed);
-        if (moveBackward) camera.position.addScaledVector(dir, -speed);
-        if (moveLeft) camera.position.addScaledVector(sideDir, speed);
-        if (moveRight) camera.position.addScaledVector(sideDir, -speed);
-
-        // Enforce 50-meter radius limit around origin (0,0)
-        const distFromCenter = Math.sqrt(camera.position.x * camera.position.x + camera.position.z * camera.position.z);
-        if (distFromCenter > 50) {
-          camera.position.x = (camera.position.x / distFromCenter) * 50;
-          camera.position.z = (camera.position.z / distFromCenter) * 50;
-        }
-
-        camera.position.y = 1.7; // Maintain eye height
-
-        // If player moves significantly, update generation anchor offset
-        if (camera.position.distanceTo(lastReloadPos) > 30) {
-          lastReloadPos.copy(camera.position);
-        }
-
-        const euler = new THREE.Euler(pitch, yaw, 0, 'YXZ');
-        camera.quaternion.setFromEuler(euler);
-
-        renderer.render(scene, camera);
-      };
-
-      animate();
-
-      threeApp = {
-        cleanup: () => {
-          cancelAnimationFrame(animationFrameId);
-          window.removeEventListener('keydown', onKeyDown);
-          window.removeEventListener('keyup', onKeyUp);
-          window.removeEventListener('resize', handleResize);
-          renderer.dispose();
-        }
-      };
-    }
-  </script>
+  }
+}
+
+function updatePlayer(dt) {
+  // crouch (blocked from standing up under a ceiling)
+  const wantCrouch = keys.KeyC || keys.ControlLeft;
+  const targetH = wantCrouch ? CFG.crouchHeight : CFG.standHeight;
+  if (targetH > player.height) {
+    const prev = player.height; player.height = targetH;
+    if (solids.some(overlaps)) player.height = prev;
+  } else player.height = targetH;
+  const crouching = player.height < CFG.standHeight - 0.01;
+
+  // wish direction relative to where we're looking
+  const fwd = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
+  const strafe = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
+  const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
+  let wx = strafe * cos - fwd * sin, wz = -strafe * sin - fwd * cos;
+  const len = Math.hypot(wx, wz); if (len > 0) { wx /= len; wz /= len; }
+
+  const sprinting = keys.ShiftLeft && fwd > 0 && !crouching;
+  const speed = crouching ? CFG.crouchSpeed : sprinting ? CFG.sprintSpeed : CFG.walkSpeed;
+  const accel = CFG.groundAccel * (player.grounded ? 1 : CFG.airControl) * dt;
+  const approach = (v, t) => v + Math.max(-accel, Math.min(accel, t - v));
+  player.vel.x = approach(player.vel.x, wx * speed);
+  player.vel.z = approach(player.vel.z, wz * speed);
+
+  // jump + gravity
+  if (keys.Space && player.grounded) player.vel.y = CFG.jumpSpeed;
+  player.vel.y -= CFG.gravity * dt;
+
+  // integrate with collision
+  player.grounded = false;
+  moveAxis('x', player.vel.x * dt);
+  moveAxis('z', player.vel.z * dt);
+  moveAxis('y', player.vel.y * dt);
+  if (player.pos.y <= 0) { player.pos.y = 0; player.vel.y = 0; player.grounded = true; }
+
+  // view effects: head bob + sprint FOV
+  const hSpeed = Math.hypot(player.vel.x, player.vel.z);
+  if (player.grounded) player.bob += hSpeed * dt * CFG.bobSpeed / CFG.walkSpeed;
+  const bobY = player.grounded ? Math.sin(player.bob) * CFG.bobAmount * Math.min(hSpeed / CFG.walkSpeed, 1) : 0;
+  const targetFov = CFG.fov + (sprinting && hSpeed > 1 ? CFG.sprintFovBoost : 0);
+  player.fov += (targetFov - player.fov) * Math.min(1, dt * 8);
+  if (Math.abs(camera.fov - player.fov) > 0.01) { camera.fov = player.fov; camera.updateProjectionMatrix(); }
+
+  // camera follows eye position
+  camera.position.set(player.pos.x, player.pos.y + player.height - CFG.eyeOffset + bobY, player.pos.z);
+  camera.rotation.set(player.pitch, player.yaw, 0);
+
+  document.getElementById('hud').textContent =
+    `speed ${hSpeed.toFixed(1)} m/s · ${player.grounded ? 'grounded' : 'airborne'}${crouching ? ' · crouching' : ''}`;
+}
+
+/* ================= Loop ================= */
+function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize); resize();
+
+let last = performance.now();
+(function frame(now) {
+  requestAnimationFrame(frame);
+  let dt = Math.min((now - last) / 1000, 0.1); last = now;
+  const steps = Math.ceil(dt / 0.016);          // substeps keep collisions stable on slow frames
+  for (let i = 0; i < steps; i++) updatePlayer(dt / steps);
+  renderer.render(scene, camera);
+})(last);
+</script>
 </body>
 </html>
