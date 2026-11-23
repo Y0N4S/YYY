@@ -15,6 +15,9 @@
   #card p { margin:4px 0; font-size:14px; }
   kbd { background:rgba(255,255,255,.14); border-radius:4px; padding:1px 6px; font-size:12px; }
   #cross { position:fixed; left:50%; top:50%; width:4px; height:4px; margin:-2px; border-radius:50%; background:#fff; mix-blend-mode:difference; pointer-events:none; }
+  #ratio { position:fixed; z-index:5; top:calc(12px + env(safe-area-inset-top,0px)); left:12px; width:230px; background:var(--panel); border:1px solid var(--edge); border-radius:8px; padding:8px 12px; font:12px system-ui, sans-serif; }
+  #ratio input { width:100%; margin:6px 0 2px; }
+  #ratio .hint { opacity:.7; margin-top:4px; }
   #credit { position:fixed; right:12px; bottom:calc(12px + env(safe-area-inset-bottom,0px)); font:11px system-ui, sans-serif; background:var(--panel); padding:5px 9px; border-radius:6px; pointer-events:none; text-align:right; }
   #hud { position:fixed; left:12px; bottom:calc(12px + env(safe-area-inset-bottom,0px)); font:12px ui-monospace, monospace; background:var(--panel); padding:6px 10px; border-radius:6px; pointer-events:none; }
 </style>
@@ -23,11 +26,18 @@
 <div id="cross"></div>
 <div id="hud"></div>
 <div id="credit"></div>
+<div id="ratio">
+  <label for="rs">Map scale</label>
+  <input id="rs" type="range">
+  <div id="rv"></div>
+  <div class="hint">Keys: <kbd>[</kbd> zoom in, <kbd>]</kbd> zoom out</div>
+</div>
 <div id="overlay"><div id="card">
   <h1>First-person template</h1>
   <p>Click to capture the mouse.</p>
   <p><kbd>W A S D</kbd> move &nbsp; <kbd>Shift</kbd> sprint</p>
   <p><kbd>Space</kbd> jump &nbsp; <kbd>C</kbd> crouch &nbsp; <kbd>Esc</kbd> release</p>
+  <p>Map scale: use the slider (press Esc first) or <kbd>[</kbd> <kbd>]</kbd>.</p>
   <p>Allow location access to texture the ground with the map around you (1 km radius).</p>
 </div></div>
 
@@ -44,8 +54,11 @@ const CFG = {
   sensitivity: 0.0022, maxPitch: 89 * Math.PI / 180,
   fov: 75, sprintFovBoost: 8,
   bobAmount: 0.05, bobSpeed: 9,
-  mapZoom: 16,       // OSM zoom: 16 ≈ 1.7 m/px at Toronto (36 tiles). 17 is sharper but ~4x the tile requests
-  mapRadius: 1000    // metres: map coverage and walkable limit
+  mapZoom: 17,       // OSM tile zoom: higher = sharper source image but more requests (16 ≈ 36 tiles, 17 ≈ 100)
+  mapRadius: 1000,   // real-world metres of map loaded around you
+  mapUnitsPerMetre: 4, // MAP SCALE: real-world metres shown on each 1 m x 1 m floor square. 1 = true scale,
+                       // higher = smaller, sharper world (walkable radius = mapRadius / this)
+  ratioMin: 0.1, ratioMax: 100   // slider range
 };
 
 /* ================= Scene ================= */
@@ -112,7 +125,7 @@ document.addEventListener('pointerlockchange', () => {
 });
 addEventListener('mousemove', e => {
   if (locked) look(e.movementX, e.movementY);
-  else if (dragLook && e.buttons) look(e.movementX, e.movementY);
+  else if (dragLook && e.buttons && !e.target.closest('#ratio')) look(e.movementX, e.movementY);
 });
 addEventListener('keydown', e => { if (e.code === 'Escape' && dragLook) { dragLook = false; overlay.style.display = 'flex'; } });
 
@@ -173,7 +186,8 @@ function updatePlayer(dt) {
   moveAxis('z', player.vel.z * dt);
   moveAxis('y', player.vel.y * dt);
   const dist = Math.hypot(player.pos.x, player.pos.z);   // stay inside the mapped circle
-  if (CFG.mapRadius && dist > CFG.mapRadius) { player.pos.x *= CFG.mapRadius / dist; player.pos.z *= CFG.mapRadius / dist; }
+  const lim = CFG.mapRadius / mapRatio;
+  if (dist > lim) { player.pos.x *= lim / dist; player.pos.z *= lim / dist; }
   if (player.pos.y <= 0) { player.pos.y = 0; player.vel.y = 0; player.grounded = true; }
 
   // view effects: head bob + sprint FOV
@@ -195,6 +209,27 @@ function updatePlayer(dt) {
 /* ================= Map ground (OpenStreetMap tiles) =================
    World axes: +x = east, -z = north, 1 unit = 1 metre. The player's real location is (0, 0).
    Test without GPS: add ?lat=43.6426&lon=-79.3871 to the URL. */
+/* Map scale: mapGroup is scaled about the origin (your real position), so changing the ratio
+   never moves you relative to the map. Floor metre = mapRatio real metres. */
+const mapGroup = new THREE.Group(); scene.add(mapGroup);
+let mapRatio = CFG.mapUnitsPerMetre;
+const rs = document.getElementById('rs'), rv = document.getElementById('rv');
+rs.min = Math.log10(CFG.ratioMin); rs.max = Math.log10(CFG.ratioMax); rs.step = 0.01;   // log slider
+function setRatio(r) {
+  mapRatio = Math.min(CFG.ratioMax, Math.max(CFG.ratioMin, r));
+  rs.value = Math.log10(mapRatio);
+  mapGroup.scale.set(1 / mapRatio, 1, 1 / mapRatio);           // keep height at 1 to avoid z-fighting
+  const f = mapRatio >= 10 ? mapRatio.toFixed(0) : mapRatio.toFixed(1);
+  rv.textContent = `1 m × 1 m of floor = ${f} m × ${f} m of map (reach ${Math.round(CFG.mapRadius / mapRatio)} m)`;
+}
+rs.addEventListener('input', () => setRatio(10 ** rs.value));
+rs.addEventListener('change', () => rs.blur());                 // so Space/arrows go back to the game
+addEventListener('keydown', e => {
+  if (e.code === 'BracketLeft') setRatio(mapRatio / 1.1);
+  if (e.code === 'BracketRight') setRatio(mapRatio * 1.1);
+});
+setRatio(CFG.mapUnitsPerMetre);
+
 const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const credit = document.getElementById('credit');
 let locStarted = false;
@@ -217,14 +252,19 @@ const loadImage = url => new Promise(res => {
 });
 
 async function loadMap(lat, lon) {
-  const z = CFG.mapZoom, n = 2 ** z, rad = lat * Math.PI / 180;
-  const mpp = 156543.03392 * Math.cos(rad) / n;                 // metres per pixel
-  const cx = (lon + 180) / 360 * n;                              // fractional tile coords of the player
-  const cy = (1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * n;
-  const rt = CFG.mapRadius / (mpp * 256);                        // radius in tiles
-  const x0 = Math.floor(cx - rt), x1 = Math.floor(cx + rt);
-  const y0 = Math.max(0, Math.floor(cy - rt)), y1 = Math.min(n - 1, Math.floor(cy + rt));
-  const cols = x1 - x0 + 1, rows = y1 - y0 + 1;
+  const rad = lat * Math.PI / 180, maxTex = Math.min(renderer.capabilities.maxTextureSize, 8192);
+  let z = CFG.mapZoom, n, mpp, cx, cy, x0, x1, y0, y1, cols, rows;
+  for (;; z--) {                                                 // lower the zoom until the mosaic fits in one texture
+    n = 2 ** z;
+    mpp = 156543.03392 * Math.cos(rad) / n;                      // real metres per source pixel
+    cx = (lon + 180) / 360 * n;                                  // fractional tile coords of the player
+    cy = (1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * n;
+    const rt = CFG.mapRadius / (mpp * 256);                      // radius in tiles
+    x0 = Math.floor(cx - rt); x1 = Math.floor(cx + rt);
+    y0 = Math.max(0, Math.floor(cy - rt)); y1 = Math.min(n - 1, Math.floor(cy + rt));
+    cols = x1 - x0 + 1; rows = y1 - y0 + 1;
+    if (Math.max(cols, rows) * 256 <= maxTex || z <= 12) break;
+  }
   credit.textContent = `Loading ${cols * rows} map tiles…`;
 
   const canvas = document.createElement('canvas');
@@ -245,7 +285,7 @@ async function loadMap(lat, lon) {
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex }));
   ground.rotation.x = -Math.PI / 2;                              // texture top = north = -z
   ground.position.set(((cx - x0) * 256 * -1 + canvas.width / 2) * mpp, 0.02, ((cy - y0) * 256 * -1 + canvas.height / 2) * mpp);
-  scene.add(ground);
+  mapGroup.add(ground);
   grid.visible = false;
   credit.innerHTML = `${lat.toFixed(4)}, ${lon.toFixed(4)} · © <a style="color:inherit" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors`;
   credit.style.pointerEvents = 'auto';
