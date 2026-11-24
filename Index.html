@@ -58,7 +58,9 @@ const CFG = {
   mapRadius: 1000,   // real-world metres of map loaded around you
   mapUnitsPerMetre: 4, // MAP SCALE: real-world metres shown on each 1 m x 1 m floor square. 1 = true scale,
                        // higher = smaller, sharper world (walkable radius = mapRadius / this)
-  ratioMin: 0.1, ratioMax: 100   // slider range
+  ratioMin: 0.1, ratioMax: 100,  // slider range
+  defaultBuildingHeight: 9,      // metres, when OSM has no height or levels tag
+  levelHeight: 3.2               // metres per building:levels
 };
 
 /* ================= Scene ================= */
@@ -75,10 +77,10 @@ const camera = new THREE.PerspectiveCamera(CFG.fov, 1, 0.05, 4000);
 camera.rotation.order = 'YXZ';   // yaw first, then pitch: no roll
 
 /* ================= World (replace with your level) ================= */
-const solids = [];               // collision boxes (THREE.Box3)
+const solids = [], testMeshes = [];               // collision boxes (THREE.Box3)
 function addBox(x, y, z, w, h, d, color) { // x,z = center; y = bottom
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color }));
-  m.position.set(x, y + h / 2, z); scene.add(m);
+  m.position.set(x, y + h / 2, z); scene.add(m); testMeshes.push(m);
   solids.push(new THREE.Box3().setFromObject(m));
 }
 const floor = new THREE.Mesh(new THREE.PlaneGeometry(20000, 20000), new THREE.MeshLambertMaterial({ color: 0x6f8f6a }));
@@ -150,6 +152,7 @@ function moveAxis(axis, amount) {
       player.vel[axis] = 0;
     }
   }
+  collideBuildings(axis, amount);
 }
 
 function updatePlayer(dt) {
@@ -203,7 +206,7 @@ function updatePlayer(dt) {
   camera.rotation.set(player.pitch, player.yaw, 0);
 
   document.getElementById('hud').textContent =
-    `speed ${hSpeed.toFixed(1)} m/s · ${player.grounded ? 'grounded' : 'airborne'}${crouching ? ' · crouching' : ''}`;
+    `speed ${hSpeed.toFixed(1)} m/s · ${player.grounded ? 'grounded' : 'airborne'}${crouching ? ' · crouching' : ''}${buildingStatus}`;
 }
 
 /* ================= Map ground (OpenStreetMap tiles) =================
@@ -211,7 +214,8 @@ function updatePlayer(dt) {
    Test without GPS: add ?lat=43.6426&lon=-79.3871 to the URL. */
 /* Map scale: mapGroup is scaled about the origin (your real position), so changing the ratio
    never moves you relative to the map. Floor metre = mapRatio real metres. */
-const mapGroup = new THREE.Group(); scene.add(mapGroup);
+const mapGroup = new THREE.Group(); scene.add(mapGroup);          // ground texture (x/z scaled only)
+const bGroup = new THREE.Group(); scene.add(bGroup);              // buildings (scaled uniformly, so heights shrink too)
 let mapRatio = CFG.mapUnitsPerMetre;
 const rs = document.getElementById('rs'), rv = document.getElementById('rv');
 rs.min = Math.log10(CFG.ratioMin); rs.max = Math.log10(CFG.ratioMax); rs.step = 0.01;   // log slider
@@ -219,6 +223,7 @@ function setRatio(r) {
   mapRatio = Math.min(CFG.ratioMax, Math.max(CFG.ratioMin, r));
   rs.value = Math.log10(mapRatio);
   mapGroup.scale.set(1 / mapRatio, 1, 1 / mapRatio);           // keep height at 1 to avoid z-fighting
+  bGroup.scale.setScalar(1 / mapRatio);
   const f = mapRatio >= 10 ? mapRatio.toFixed(0) : mapRatio.toFixed(1);
   rv.textContent = `1 m × 1 m of floor = ${f} m × ${f} m of map (reach ${Math.round(CFG.mapRadius / mapRatio)} m)`;
 }
@@ -229,6 +234,105 @@ addEventListener('keydown', e => {
   if (e.code === 'BracketRight') setRatio(mapRatio * 1.1);
 });
 setRatio(CFG.mapUnitsPerMetre);
+
+/* ================= Buildings (OSM footprints -> oriented boxes) =================
+   Each building becomes the smallest rotated rectangle around its footprint, extruded to its
+   real height (height tag, else building:levels, else CFG.defaultBuildingHeight).
+   Data stored in REAL metres; collision and rendering scale by 1 / mapRatio. */
+const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+const buildings = [];
+let buildingStatus = '';
+
+function minRect(pts) {                       // pts: [[x, z], ...] -> {x, z, hx, hz, c, s, ang}
+  const P = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], up = [];
+  for (const p of P) { while (lo.length > 1 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+  for (let i = P.length - 1; i >= 0; i--) { const p = P[i]; while (up.length > 1 && cr(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+  const H = lo.slice(0, -1).concat(up.slice(0, -1));          // convex hull
+  if (H.length < 3) return null;
+  let best = null;
+  for (let i = 0; i < H.length; i++) {                        // try each hull edge as the box's axis
+    const a = H[i], b = H[(i + 1) % H.length], ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    const c = Math.cos(ang), s = Math.sin(ang);
+    let u0 = 1e9, u1 = -1e9, v0 = 1e9, v1 = -1e9;
+    for (const p of H) {
+      const u = p[0] * c + p[1] * s, v = -p[0] * s + p[1] * c;
+      u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v);
+    }
+    const area = (u1 - u0) * (v1 - v0);
+    if (!best || area < best.area) best = { area, ang, c, s, u0, u1, v0, v1 };
+  }
+  const mu = (best.u0 + best.u1) / 2, mv = (best.v0 + best.v1) / 2;
+  return { x: mu * best.c - mv * best.s, z: mu * best.s + mv * best.c,
+           hx: (best.u1 - best.u0) / 2, hz: (best.v1 - best.v0) / 2, c: best.c, s: best.s, ang: best.ang };
+}
+
+function heightOf(t) {
+  const h = parseFloat(t.height); if (h > 0) return h;
+  const l = parseFloat(t['building:levels']); if (l > 0) return l * CFG.levelHeight;
+  return CFG.defaultBuildingHeight;
+}
+
+async function loadBuildings(lat, lon) {
+  buildingStatus = ' · loading buildings…';
+  try {
+    const q = `[out:json][timeout:30];way["building"](around:${CFG.mapRadius},${lat},${lon});out tags geom;`;
+    const res = await fetch(OVERPASS_URL, { method: 'POST', body: 'data=' + encodeURIComponent(q),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const kx = 111320 * Math.cos(lat * Math.PI / 180), kz = 111132;   // metres per degree
+    const list = [];
+    for (const w of data.elements) {
+      if (!w.geometry || w.geometry.length < 4) continue;
+      const r = minRect(w.geometry.map(g => [(g.lon - lon) * kx, -(g.lat - lat) * kz]));  // -z = north
+      if (!r || Math.hypot(r.x, r.z) > CFG.mapRadius) continue;
+      r.hx = Math.max(r.hx, 0.75); r.hz = Math.max(r.hz, 0.75);
+      r.h = heightOf(w.tags || {}); r.r = Math.hypot(r.hx, r.hz);
+      list.push(r);
+    }
+    if (!list.length) { buildingStatus = ' · no buildings found'; return; }
+
+    const geo = new THREE.BoxGeometry(1, 1, 1); geo.translate(0, 0.5, 0);   // unit cube sitting on y = 0
+    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), list.length);
+    mesh.frustumCulled = false;
+    const d = new THREE.Object3D(), col = new THREE.Color();
+    list.forEach((b, i) => {
+      d.position.set(b.x, 0, b.z); d.rotation.set(0, -b.ang, 0); d.scale.set(b.hx * 2, b.h, b.hz * 2);
+      d.updateMatrix(); mesh.setMatrixAt(i, d.matrix);
+      col.setHSL(0.09, 0.12, 0.74 - Math.min(b.h, 60) / 60 * 0.3 + ((i * 37) % 11) / 200);  // taller = darker
+      mesh.setColorAt(i, col);
+    });
+    bGroup.add(mesh);
+    buildings.push(...list);
+    testMeshes.forEach(m => scene.remove(m)); testMeshes.length = 0; solids.length = 0;   // drop the demo blocks
+    buildingStatus = ` · ${list.length} buildings`;
+  } catch (e) { buildingStatus = ' · buildings failed (' + e.message + ')'; }
+}
+
+// Circle (player) vs rotated box. Walk into the sides; land on and walk across the roof.
+function collideBuildings(axis, amount) {
+  const k = 1 / mapRatio, p = player.pos, rad = CFG.radius;
+  for (const b of buildings) {
+    const bx = b.x * k, bz = b.z * k, top = b.h * k, R = b.r * k + rad;
+    if (Math.abs(p.x - bx) > R || Math.abs(p.z - bz) > R || p.y >= top) continue;
+    const dx = p.x - bx, dz = p.z - bz, hx = b.hx * k, hz = b.hz * k;
+    const lx = dx * b.c + dz * b.s, lz = -dx * b.s + dz * b.c;           // player in box space
+    const ex = lx - Math.max(-hx, Math.min(hx, lx)), ez = lz - Math.max(-hz, Math.min(hz, lz));
+    const d2 = ex * ex + ez * ez;
+    if (d2 >= rad * rad) continue;
+    if (axis === 'y') { if (amount <= 0) { p.y = top; player.vel.y = 0; player.grounded = true; } continue; }
+    let px, pz;                                                           // push-out in box space
+    if (d2 > 1e-9) { const dd = Math.sqrt(d2); px = ex / dd * (rad - dd); pz = ez / dd * (rad - dd); }
+    else if (hx - Math.abs(lx) < hz - Math.abs(lz)) { px = Math.sign(lx || 1) * (hx - Math.abs(lx) + rad); pz = 0; }
+    else { px = 0; pz = Math.sign(lz || 1) * (hz - Math.abs(lz) + rad); }
+    const wx = px * b.c - pz * b.s, wz = px * b.s + pz * b.c, m = Math.hypot(wx, wz) || 1;
+    p.x += wx; p.z += wz;
+    const vn = (player.vel.x * wx + player.vel.z * wz) / m;               // cancel velocity into the wall
+    if (vn < 0) { player.vel.x -= wx / m * vn; player.vel.z -= wz / m * vn; }
+  }
+}
 
 const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const credit = document.getElementById('credit');
@@ -252,6 +356,7 @@ const loadImage = url => new Promise(res => {
 });
 
 async function loadMap(lat, lon) {
+  loadBuildings(lat, lon);                                       // runs in parallel with the tiles
   const rad = lat * Math.PI / 180, maxTex = Math.min(renderer.capabilities.maxTextureSize, 8192);
   let z = CFG.mapZoom, n, mpp, cx, cy, x0, x1, y0, y1, cols, rows;
   for (;; z--) {                                                 // lower the zoom until the mosaic fits in one texture
