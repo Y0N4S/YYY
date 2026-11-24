@@ -1,162 +1,557 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>My Video Library</title>
-<style>
-:root{--bg:#f7f6f3;--card:#fff;--text:#1f1f1d;--muted:#6b6a66;--accent:#d9622b;--border:#e2e0da;
-box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#171716;--card:#232321;--text:#f0efeb;--muted:#9a9890;--accent:#ef8a55;--border:#38372f;color-scheme:dark}}
-:root[data-theme="dark"]{--bg:#171716;--card:#232321;--text:#f0efeb;--muted:#9a9890;--accent:#ef8a55;--border:#38372f;color-scheme:dark}
-html{scroll-padding-top:env(safe-area-inset-top,0px)}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-main{max-width:1000px;margin:0 auto;padding:24px 16px 48px}
-h1{margin:0 0 4px;font-size:1.6rem}
-.sub{color:var(--muted);margin:0 0 20px;font-size:.9rem}
-.player{background:#000;border-radius:12px;overflow:hidden;margin-bottom:8px;display:none}
-.player video{width:100%;max-height:70vh;display:block;background:#000}
-.now{display:none;margin:0 0 20px;font-weight:600;word-break:break-word}
-.drop{border:2px dashed var(--border);border-radius:12px;padding:28px 16px;text-align:center;background:var(--card);cursor:pointer;margin-bottom:24px;transition:border-color .15s}
-.drop.over,.drop:hover{border-color:var(--accent)}
-.drop strong{color:var(--accent)}
-.drop small{display:block;color:var(--muted);margin-top:6px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
-.item{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
-.item.active{outline:2px solid var(--accent)}
-.thumb{position:relative;aspect-ratio:16/9;background:#000;cursor:pointer;border:0;padding:0;width:100%}
-.thumb video{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
-.thumb span{position:absolute;inset:0;display:grid;place-items:center;font-size:2rem;color:#fff;background:rgba(0,0,0,.25)}
-.meta{padding:10px 12px;display:flex;gap:8px;align-items:center;justify-content:space-between}
-.meta div{min-width:0}
-.name{font-size:.9rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.size{font-size:.75rem;color:var(--muted)}
-button.del{background:none;border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:.8rem}
-button.del:hover{color:#c0392b;border-color:#c0392b}
-.empty,.msg{color:var(--muted);text-align:center;padding:20px}
-.msg{color:#c0392b;padding:0 0 12px}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lumina — Curated Photography Showcase</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter & Playfair Display -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,500;1,400&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        serif: ['Playfair Display', 'serif'],
+                    },
+                    animation: {
+                        'ken-burns': 'kenBurns 12s ease-out forwards',
+                    },
+                    keyframes: {
+                        kenBurns: {
+                            '0%': { transform: 'scale(1.0)' },
+                            '100%': { transform: 'scale(1.07)' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
 </head>
-<body>
-<main>
-  <h1>My Video Library</h1>
-  <p class="sub">Add videos, and they’re saved in this browser so they’ll still be here next time you visit.</p>
+<body class="bg-zinc-950 text-zinc-100 font-sans antialiased selection:bg-white/20 selection:text-white overflow-x-hidden min-h-screen flex flex-col justify-between">
 
-  <div class="player" id="playerWrap"><video id="player" controls playsinline></video></div>
-  <p class="now" id="now"></p>
+    <!-- Top Navigation / Header -->
+    <header class="fixed top-0 left-0 right-0 z-30 px-4 sm:px-8 py-5 flex items-center justify-between bg-gradient-to-b from-black/80 via-black/40 to-transparent pointer-events-none">
+        <div class="flex items-center gap-3 pointer-events-auto">
+            <div class="w-8 h-8 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center">
+                <i data-lucide="aperture" class="w-4 h-4 text-white"></i>
+            </div>
+            <div>
+                <h1 class="text-sm sm:text-base font-medium tracking-wider uppercase text-white">Lumina</h1>
+                <p class="text-[11px] text-zinc-400 tracking-widest uppercase hidden sm:block">Curated Visual Anthology</p>
+            </div>
+        </div>
 
-  <div class="msg" id="msg" hidden></div>
-  <div class="drop" id="drop" tabindex="0" role="button" aria-label="Add videos">
-    <strong>Click to add videos</strong> or drag and drop them here
-    <small>Stored privately on this device only</small>
-  </div>
-  <input type="file" id="file" accept="video/*" multiple hidden>
+        <!-- Slide Counter & Autoplay Control -->
+        <div class="flex items-center gap-3 sm:gap-4 pointer-events-auto">
+            <!-- Slide Counter Pill -->
+            <div class="px-3.5 py-1.5 rounded-full bg-zinc-900/70 backdrop-blur-md border border-white/10 text-xs font-medium tracking-widest text-zinc-300 flex items-center gap-1.5">
+                <span id="current-slide-num" class="text-white font-semibold">01</span>
+                <span class="text-zinc-600">/</span>
+                <span id="total-slides-num" class="text-zinc-400">05</span>
+            </div>
 
-  <div class="grid" id="grid"></div>
-  <div class="empty" id="empty">No videos yet.</div>
-</main>
+            <!-- Play / Pause Toggle Button -->
+            <button id="play-pause-btn" aria-label="Pause slideshow" title="Play/Pause (Spacebar)"
+                class="group flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-zinc-900/70 hover:bg-zinc-800/90 active:scale-95 backdrop-blur-md border border-white/10 hover:border-white/25 text-xs font-medium text-zinc-200 transition-all duration-200 cursor-pointer">
+                <span id="play-pause-icon" class="flex items-center justify-center">
+                    <i data-lucide="pause" class="w-3.5 h-3.5 text-white"></i>
+                </span>
+                <span id="play-pause-text" class="hidden sm:inline tracking-wide">Playing</span>
+            </button>
+        </div>
+    </header>
 
-<script>
-(function(){
-  var DB_NAME='video-library', STORE='videos', db=null, memory=[], urls={}, activeId=null;
-  var $=function(id){return document.getElementById(id)};
-  var grid=$('grid'), player=$('player'), wrap=$('playerWrap'), now=$('now'), msg=$('msg');
+    <!-- Main Fullscreen Carousel Stage -->
+    <main id="carousel-stage" class="relative w-full h-screen min-h-[560px] flex items-center justify-center overflow-hidden select-none">
+        
+        <!-- Slides Container (Populated via JS) -->
+        <div id="slides-wrapper" class="relative w-full h-full">
+            <!-- Slide items injected dynamically -->
+        </div>
 
-  function openDB(){
-    return new Promise(function(res){
-      try{
-        var req=indexedDB.open(DB_NAME,1);
-        req.onupgradeneeded=function(){req.result.createObjectStore(STORE,{keyPath:'id'})};
-        req.onsuccess=function(){res(req.result)};
-        req.onerror=function(){res(null)};
-      }catch(e){res(null)}
-    });
-  }
-  function tx(mode,fn){
-    return new Promise(function(res,rej){
-      if(!db){res(null);return}
-      try{
-        var t=db.transaction(STORE,mode), s=t.objectStore(STORE), r=fn(s);
-        t.oncomplete=function(){res(r&&r.result)};
-        t.onerror=t.onabort=function(){rej(t.error)};
-      }catch(e){rej(e)}
-    });
-  }
-  function fmt(b){
-    if(b<1048576)return Math.max(1,Math.round(b/1024))+' KB';
-    if(b<1073741824)return (b/1048576).toFixed(1)+' MB';
-    return (b/1073741824).toFixed(2)+' GB';
-  }
-  function showMsg(t){msg.textContent=t;msg.hidden=!t}
+        <!-- Subtle Vignette Overlays for Text Contrast -->
+        <div class="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/25 to-black/30 pointer-events-none z-10"></div>
+        <div class="absolute inset-0 bg-radial from-transparent to-black/40 pointer-events-none z-10"></div>
 
-  async function load(){
-    try{var all=await tx('readonly',function(s){return s.getAll()});memory=all||[]}catch(e){showMsg('Couldn’t read saved videos.')}
-    memory.sort(function(a,b){return b.added-a.added});
-    render();
-  }
-  function urlFor(v){
-    if(!urls[v.id])urls[v.id]=URL.createObjectURL(v.blob);
-    return urls[v.id];
-  }
-  function render(){
-    grid.textContent='';
-    $('empty').style.display=memory.length?'none':'block';
-    memory.forEach(function(v){
-      var item=document.createElement('div');item.className='item'+(v.id===activeId?' active':'');
-      var th=document.createElement('button');th.className='thumb';th.type='button';th.setAttribute('aria-label','Play '+v.name);
-      var vid=document.createElement('video');vid.muted=true;vid.preload='metadata';vid.src=urlFor(v)+'#t=0.5';
-      var ic=document.createElement('span');ic.textContent='\u25B6';
-      th.append(vid,ic);th.onclick=function(){play(v.id)};
-      var meta=document.createElement('div');meta.className='meta';
-      var info=document.createElement('div');
-      var n=document.createElement('div');n.className='name';n.textContent=v.name;n.title=v.name;
-      var sz=document.createElement('div');sz.className='size';sz.textContent=fmt(v.blob.size);
-      info.append(n,sz);
-      var del=document.createElement('button');del.className='del';del.textContent='Delete';
-      del.onclick=function(){remove(v.id)};
-      meta.append(info,del);item.append(th,meta);grid.append(item);
-    });
-  }
-  function play(id){
-    var v=memory.find(function(x){return x.id===id});if(!v)return;
-    activeId=id;player.src=urlFor(v);wrap.style.display='block';
-    now.style.display='block';now.textContent=v.name;
-    player.play().catch(function(){});
-    wrap.scrollIntoView({behavior:'smooth',block:'start'});render();
-  }
-  async function remove(id){
-    if(!confirm('Delete this video?'))return;
-    try{await tx('readwrite',function(s){return s.delete(id)})}catch(e){}
-    if(urls[id]){URL.revokeObjectURL(urls[id]);delete urls[id]}
-    memory=memory.filter(function(x){return x.id!==id});
-    if(activeId===id){player.pause();player.removeAttribute('src');player.load();wrap.style.display='none';now.style.display='none';activeId=null}
-    render();
-  }
-  async function add(files){
-    showMsg('');var skipped=0,failed=false;
-    for(var i=0;i<files.length;i++){
-      var f=files[i];
-      if(!f.type.startsWith('video/')){skipped++;continue}
-      var rec={id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),name:f.name,blob:f,added:Date.now()};
-      try{await tx('readwrite',function(s){return s.put(rec)})}catch(e){failed=true}
-      memory.unshift(rec);
-    }
-    if(!db||failed)showMsg('Saved for this session only — this browser blocked permanent storage.');
-    else if(skipped)showMsg(skipped+' file(s) skipped because they aren’t videos.');
-    render();
-  }
+        <!-- Left / Previous Arrow Button -->
+        <button id="prev-btn" aria-label="Previous slide" title="Previous Slide (Left Arrow)"
+            class="absolute left-3 sm:left-8 top-1/2 -translate-y-1/2 z-20 p-3 sm:p-4 rounded-full bg-black/40 hover:bg-black/70 active:scale-95 backdrop-blur-md border border-white/10 hover:border-white/30 text-white/80 hover:text-white transition-all duration-200 cursor-pointer group focus:outline-none focus:ring-2 focus:ring-white/40">
+            <i data-lucide="chevron-left" class="w-5 h-5 sm:w-6 sm:h-6 transition-transform duration-200 group-hover:-translate-x-0.5"></i>
+        </button>
 
-  var drop=$('drop'),input=$('file');
-  drop.onclick=function(){input.click()};
-  drop.onkeydown=function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();input.click()}};
-  input.onchange=function(){add(Array.from(input.files));input.value=''};
-  ['dragenter','dragover'].forEach(function(t){drop.addEventListener(t,function(e){e.preventDefault();drop.classList.add('over')})});
-  ['dragleave','drop'].forEach(function(t){drop.addEventListener(t,function(e){e.preventDefault();drop.classList.remove('over')})});
-  drop.addEventListener('drop',function(e){add(Array.from(e.dataTransfer.files))});
+        <!-- Right / Next Arrow Button -->
+        <button id="next-btn" aria-label="Next slide" title="Next Slide (Right Arrow)"
+            class="absolute right-3 sm:right-8 top-1/2 -translate-y-1/2 z-20 p-3 sm:p-4 rounded-full bg-black/40 hover:bg-black/70 active:scale-95 backdrop-blur-md border border-white/10 hover:border-white/30 text-white/80 hover:text-white transition-all duration-200 cursor-pointer group focus:outline-none focus:ring-2 focus:ring-white/40">
+            <i data-lucide="chevron-right" class="w-5 h-5 sm:w-6 sm:h-6 transition-transform duration-200 group-hover:translate-x-0.5"></i>
+        </button>
 
-  openDB().then(function(d){db=d;return load()});
-})();
-</script>
+        <!-- Bottom Overlay: Captions, Progress Bar, and Thumbnails/Dots -->
+        <div class="absolute bottom-0 left-0 right-0 z-20 px-4 sm:px-8 pb-6 sm:pb-8 pt-12 flex flex-col gap-5 max-w-7xl mx-auto">
+            
+            <!-- Caption & Metadata Row -->
+            <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
+                <div id="caption-container" class="max-w-2xl transition-all duration-500 transform translate-y-0 opacity-100">
+                    <div class="flex items-center gap-2.5 mb-2">
+                        <span id="slide-category" class="px-2.5 py-0.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/10 text-[11px] font-medium tracking-widest uppercase text-zinc-200">
+                            Landscape
+                        </span>
+                        <span id="slide-location" class="text-xs text-zinc-400 flex items-center gap-1">
+                            <i data-lucide="map-pin" class="w-3 h-3 text-zinc-400"></i>
+                            <span>Yosemite Valley, CA</span>
+                        </span>
+                    </div>
+                    <h2 id="slide-title" class="font-serif text-2xl sm:text-4xl lg:text-5xl font-medium text-white tracking-tight leading-tight mb-1.5">
+                        Morning Mist Over El Capitan
+                    </h2>
+                    <p id="slide-description" class="text-xs sm:text-sm text-zinc-300/90 font-light leading-relaxed max-w-xl">
+                        Golden hour light pierces through the low-lying valley fog as granite monoliths emerge against a crisp alpine sky.
+                    </p>
+                </div>
+
+                <!-- Keyboard Shortcut Hint (Desktop) -->
+                <div class="hidden lg:flex items-center gap-3 text-[11px] text-zinc-400/80 pb-1">
+                    <span class="flex items-center gap-1.5">
+                        <kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/15 font-mono text-[10px] text-zinc-300">←</kbd>
+                        <kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/15 font-mono text-[10px] text-zinc-300">→</kbd>
+                        <span>Navigate</span>
+                    </span>
+                    <span class="text-zinc-700">•</span>
+                    <span class="flex items-center gap-1.5">
+                        <kbd class="px-2 py-0.5 rounded bg-white/10 border border-white/15 font-mono text-[10px] text-zinc-300">Space</kbd>
+                        <span>Pause / Play</span>
+                    </span>
+                </div>
+            </div>
+
+            <!-- Subtle Progress Bar -->
+            <div class="w-full h-1 bg-white/15 rounded-full overflow-hidden backdrop-blur-sm">
+                <div id="progress-bar" class="h-full bg-white rounded-full w-0 transition-none"></div>
+            </div>
+
+            <!-- Bottom Navigation Controls: Thumbnail Strip + Pagination Dots -->
+            <div class="flex flex-col sm:flex-row items-center justify-between gap-4 pt-1">
+                
+                <!-- 5 Clickable Thumbnail Previews -->
+                <div id="thumbnails-container" class="flex items-center gap-2.5 sm:gap-3 overflow-x-auto max-w-full py-1 px-1">
+                    <!-- Thumbnails injected dynamically -->
+                </div>
+
+                <!-- 5 Clickable Pagination Dots (Synced with thumbnails) -->
+                <div id="dots-container" class="flex items-center gap-2" role="tablist" aria-label="Slide pagination">
+                    <!-- Dots injected dynamically -->
+                </div>
+
+            </div>
+        </div>
+    </main>
+
+    <!-- Application Logic -->
+    <script>
+        /**
+         * Curated collection of 5 high-resolution photographs using reliable Picsum IDs
+         * with graceful fallbacks in case of network interruption.
+         */
+        const SLIDES_DATA = [
+            {
+                id: 1015,
+                title: "Emerald Fjord & Silent Waters",
+                category: "Scenic Landscape",
+                location: "Geirangerfjord, Norway",
+                description: "Glacial waters wind through steep, emerald-clad cliffs under an overcast Nordic sky, creating mirror-like reflections.",
+                imageUrl: "https://picsum.photos/id/1015/1920/1080",
+                thumbUrl: "https://picsum.photos/id/1015/240/150",
+                fallbackColor: "18181b"
+            },
+            {
+                id: 1036,
+                title: "High Altitude Solitude",
+                category: "Alpine Nature",
+                location: "Bernese Oberland, Switzerland",
+                description: "Fresh powder blankets jagged limestone ridges as crisp winter sunlight illuminates the untouched alpine expanse.",
+                imageUrl: "https://picsum.photos/id/1036/1920/1080",
+                thumbUrl: "https://picsum.photos/id/1036/240/150",
+                fallbackColor: "27272a"
+            },
+            {
+                id: 1067,
+                title: "Metropolis at Dusk",
+                category: "Urban Architecture",
+                location: "Downtown Skyline",
+                description: "Geometric glass facades catch the last warm embers of twilight while city avenues awaken below.",
+                imageUrl: "https://picsum.photos/id/1067/1920/1080",
+                thumbUrl: "https://picsum.photos/id/1067/240/150",
+                fallbackColor: "1e1b4b"
+            },
+            {
+                id: 1018,
+                title: "Highland Valley Passage",
+                category: "Wilderness",
+                location: "Isle of Skye, Scotland",
+                description: "Sweeping heather valleys and dramatic mountain passes shaped by centuries of wind, mist, and rain.",
+                imageUrl: "https://picsum.photos/id/1018/1920/1080",
+                thumbUrl: "https://picsum.photos/id/1018/240/150",
+                fallbackColor: "14532d"
+            },
+            {
+                id: 1043,
+                title: "Autumn Canopy & Mist",
+                category: "Forestry",
+                location: "Cascade Range, Oregon",
+                description: "Golden foliage contrasts with deep evergreen pines as morning fog drifts quietly through the timberline.",
+                imageUrl: "https://picsum.photos/id/1043/1920/1080",
+                thumbUrl: "https://picsum.photos/id/1043/240/150",
+                fallbackColor: "451a03"
+            }
+        ];
+
+        // Slideshow Configuration
+        const SLIDE_DURATION_MS = 6000; // 6 seconds per slide
+
+        // State Variables
+        let currentIndex = 0;
+        let isPlaying = true;
+        let elapsedBeforePause = 0;
+        let lastFrameTime = null;
+        let animationFrameId = null;
+
+        // Touch / Swipe Gesture State
+        let touchStartX = 0;
+        let touchEndX = 0;
+
+        // DOM Elements
+        const slidesWrapper = document.getElementById('slides-wrapper');
+        const thumbnailsContainer = document.getElementById('thumbnails-container');
+        const dotsContainer = document.getElementById('dots-container');
+        const progressBar = document.getElementById('progress-bar');
+        const currentSlideNumEl = document.getElementById('current-slide-num');
+        const totalSlidesNumEl = document.getElementById('total-slides-num');
+        const playPauseBtn = document.getElementById('play-pause-btn');
+        const playPauseIcon = document.getElementById('play-pause-icon');
+        const playPauseText = document.getElementById('play-pause-text');
+        const prevBtn = document.getElementById('prev-btn');
+        const nextBtn = document.getElementById('next-btn');
+        const carouselStage = document.getElementById('carousel-stage');
+
+        // Caption DOM Elements
+        const captionContainer = document.getElementById('caption-container');
+        const slideCategoryEl = document.getElementById('slide-category');
+        const slideLocationEl = document.getElementById('slide-location').querySelector('span');
+        const slideTitleEl = document.getElementById('slide-title');
+        const slideDescriptionEl = document.getElementById('slide-description');
+
+        /**
+         * Initializes the gallery DOM elements, event listeners, and starts playback.
+         */
+        function initGallery() {
+            try {
+                totalSlidesNumEl.textContent = String(SLIDES_DATA.length).padStart(2, '0');
+                renderSlides();
+                renderThumbnailsAndDots();
+                updateUI(0, false);
+                setupEventListeners();
+                lucide.createIcons();
+                startAnimationLoop();
+            } catch (error) {
+                console.error("Failed to initialize photography showcase:", error);
+            }
+        }
+
+        /**
+         * Creates all 5 full-bleed image layers in the DOM for smooth crossfade transitions.
+         */
+        function renderSlides() {
+            slidesWrapper.innerHTML = '';
+            SLIDES_DATA.forEach((slide, index) => {
+                const slideDiv = document.createElement('div');
+                slideDiv.className = `slide-item absolute inset-0 w-full h-full transition-opacity duration-1000 ease-in-out ${
+                    index === 0 ? 'opacity-100 z-0' : 'opacity-0 -z-10 pointer-events-none'
+                }`;
+                slideDiv.dataset.index = index;
+
+                const img = document.createElement('img');
+                img.src = slide.imageUrl;
+                img.alt = slide.title;
+                img.className = `w-full h-full object-cover object-center ${index === 0 ? 'animate-ken-burns' : ''}`;
+                img.loading = index === 0 ? 'eager' : 'lazy';
+                
+                // Reliable fallback if external image fails to load
+                img.onerror = function () {
+                    this.onerror = null;
+                    this.src = `https://placehold.co/1920x1080/${slide.fallbackColor}/ffffff?text=${encodeURIComponent(slide.title)}`;
+                };
+
+                slideDiv.appendChild(img);
+                slidesWrapper.appendChild(slideDiv);
+            });
+        }
+
+        /**
+         * Creates the 5 clickable thumbnail previews and 5 pagination dots at the bottom.
+         */
+        function renderThumbnailsAndDots() {
+            thumbnailsContainer.innerHTML = '';
+            dotsContainer.innerHTML = '';
+
+            SLIDES_DATA.forEach((slide, index) => {
+                // 1. Thumbnail Button
+                const thumbBtn = document.createElement('button');
+                thumbBtn.type = 'button';
+                thumbBtn.ariaLabel = `View slide ${index + 1}: ${slide.title}`;
+                thumbBtn.className = `thumb-btn relative group rounded-lg overflow-hidden w-14 h-9 sm:w-20 sm:h-12 flex-shrink-0 transition-all duration-300 cursor-pointer focus:outline-none ${
+                    index === 0
+                        ? 'ring-2 ring-white scale-105 opacity-100 shadow-lg shadow-black/50'
+                        : 'ring-1 ring-white/20 opacity-50 hover:opacity-90 hover:scale-102'
+                }`;
+                thumbBtn.addEventListener('click', () => goToSlide(index));
+
+                const thumbImg = document.createElement('img');
+                thumbImg.src = slide.thumbUrl;
+                thumbImg.alt = `Thumbnail for ${slide.title}`;
+                thumbImg.className = 'w-full h-full object-cover';
+                thumbImg.onerror = function () {
+                    this.onerror = null;
+                    this.src = `https://placehold.co/240x150/${slide.fallbackColor}/ffffff?text=${index + 1}`;
+                };
+
+                // Subtle dark overlay on inactive thumbnails
+                const thumbOverlay = document.createElement('div');
+                thumbOverlay.className = `thumb-overlay absolute inset-0 bg-black/30 transition-opacity duration-300 ${
+                    index === 0 ? 'opacity-0' : 'opacity-100 group-hover:opacity-0'
+                }`;
+
+                thumbBtn.appendChild(thumbImg);
+                thumbBtn.appendChild(thumbOverlay);
+                thumbnailsContainer.appendChild(thumbBtn);
+
+                // 2. Pagination Dot Button
+                const dotBtn = document.createElement('button');
+                dotBtn.type = 'button';
+                dotBtn.role = 'tab';
+                dotBtn.ariaSelected = index === 0 ? 'true' : 'false';
+                dotBtn.ariaLabel = `Go to slide ${index + 1}`;
+                dotBtn.className = `dot-btn h-2 rounded-full transition-all duration-300 cursor-pointer focus:outline-none ${
+                    index === 0
+                        ? 'w-7 bg-white'
+                        : 'w-2 bg-white/35 hover:bg-white/70'
+                }`;
+                dotBtn.addEventListener('click', () => goToSlide(index));
+                dotsContainer.appendChild(dotBtn);
+            });
+        }
+
+        /**
+         * Transitions to a specific slide index and updates captions, thumbnails, dots, and progress.
+         */
+        function goToSlide(newIndex) {
+            const total = SLIDES_DATA.length;
+            const normalizedIndex = ((newIndex % total) + total) % total;
+
+            if (normalizedIndex === currentIndex) {
+                // Reset timer even if clicking the current slide
+                resetProgress();
+                return;
+            }
+
+            currentIndex = normalizedIndex;
+            resetProgress();
+            updateUI(currentIndex, true);
+        }
+
+        function nextSlide() {
+            goToSlide(currentIndex + 1);
+        }
+
+        function prevSlide() {
+            goToSlide(currentIndex - 1);
+        }
+
+        /**
+         * Updates active classes on slides, captions, thumbnails, dots, and slide counter.
+         */
+        function updateUI(activeIndex, animateCaption = true) {
+            const slideData = SLIDES_DATA[activeIndex];
+
+            // 1. Update Counter
+            currentSlideNumEl.textContent = String(activeIndex + 1).padStart(2, '0');
+
+            // 2. Crossfade Slides & Restart subtle Ken Burns motion
+            const slideItems = document.querySelectorAll('.slide-item');
+            slideItems.forEach((item, idx) => {
+                const img = item.querySelector('img');
+                if (idx === activeIndex) {
+                    item.classList.remove('opacity-0', '-z-10', 'pointer-events-none');
+                    item.classList.add('opacity-100', 'z-0');
+                    // Restart zoom animation smoothly
+                    img.classList.remove('animate-ken-burns');
+                    void img.offsetWidth; // trigger reflow
+                    img.classList.add('animate-ken-burns');
+                } else {
+                    item.classList.remove('opacity-100', 'z-0');
+                    item.classList.add('opacity-0', '-z-10', 'pointer-events-none');
+                }
+            });
+
+            // 3. Update Caption with subtle fade-up transition
+            if (animateCaption) {
+                captionContainer.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => {
+                    slideCategoryEl.textContent = slideData.category;
+                    slideLocationEl.textContent = slideData.location;
+                    slideTitleEl.textContent = slideData.title;
+                    slideDescriptionEl.textContent = slideData.description;
+                    captionContainer.classList.remove('opacity-0', 'translate-y-2');
+                }, 200);
+            } else {
+                slideCategoryEl.textContent = slideData.category;
+                slideLocationEl.textContent = slideData.location;
+                slideTitleEl.textContent = slideData.title;
+                slideDescriptionEl.textContent = slideData.description;
+            }
+
+            // 4. Update Thumbnails
+            const thumbBtns = document.querySelectorAll('.thumb-btn');
+            thumbBtns.forEach((btn, idx) => {
+                const overlay = btn.querySelector('.thumb-overlay');
+                if (idx === activeIndex) {
+                    btn.className = 'thumb-btn relative group rounded-lg overflow-hidden w-14 h-9 sm:w-20 sm:h-12 flex-shrink-0 transition-all duration-300 cursor-pointer focus:outline-none ring-2 ring-white scale-105 opacity-100 shadow-lg shadow-black/50';
+                    if (overlay) overlay.classList.replace('opacity-100', 'opacity-0');
+                } else {
+                    btn.className = 'thumb-btn relative group rounded-lg overflow-hidden w-14 h-9 sm:w-20 sm:h-12 flex-shrink-0 transition-all duration-300 cursor-pointer focus:outline-none ring-1 ring-white/20 opacity-50 hover:opacity-90 hover:scale-102';
+                    if (overlay) overlay.classList.replace('opacity-0', 'opacity-100');
+                }
+            });
+
+            // 5. Update Pagination Dots
+            const dotBtns = document.querySelectorAll('.dot-btn');
+            dotBtns.forEach((dot, idx) => {
+                if (idx === activeIndex) {
+                    dot.setAttribute('aria-selected', 'true');
+                    dot.className = 'dot-btn h-2 rounded-full transition-all duration-300 cursor-pointer focus:outline-none w-7 bg-white';
+                } else {
+                    dot.setAttribute('aria-selected', 'false');
+                    dot.className = 'dot-btn h-2 rounded-full transition-all duration-300 cursor-pointer focus:outline-none w-2 bg-white/35 hover:bg-white/70';
+                }
+            });
+        }
+
+        /**
+         * Toggles automatic playback on or off.
+         */
+        function togglePlayPause() {
+            isPlaying = !isPlaying;
+
+            if (isPlaying) {
+                lastFrameTime = performance.now();
+                playPauseBtn.setAttribute('aria-label', 'Pause slideshow');
+                playPauseIcon.innerHTML = '<i data-lucide="pause" class="w-3.5 h-3.5 text-white"></i>';
+                playPauseText.textContent = 'Playing';
+            } else {
+                playPauseBtn.setAttribute('aria-label', 'Play slideshow');
+                playPauseIcon.innerHTML = '<i data-lucide="play" class="w-3.5 h-3.5 text-white fill-white"></i>';
+                playPauseText.textContent = 'Paused';
+            }
+            lucide.createIcons();
+        }
+
+        /**
+         * Resets the progress bar timer to zero.
+         */
+        function resetProgress() {
+            elapsedBeforePause = 0;
+            lastFrameTime = performance.now();
+            progressBar.style.width = '0%';
+        }
+
+        /**
+         * Smooth 60fps requestAnimationFrame loop driving the progress bar and automatic slide advance.
+         */
+        function startAnimationLoop() {
+            lastFrameTime = performance.now();
+
+            function tick(now) {
+                if (isPlaying) {
+                    const delta = now - lastFrameTime;
+                    elapsedBeforePause += delta;
+
+                    const progressPercent = Math.min((elapsedBeforePause / SLIDE_DURATION_MS) * 100, 100);
+                    progressBar.style.width = `${progressPercent}%`;
+
+                    if (elapsedBeforePause >= SLIDE_DURATION_MS) {
+                        elapsedBeforePause = 0;
+                        nextSlide();
+                    }
+                }
+                lastFrameTime = now;
+                animationFrameId = requestAnimationFrame(tick);
+            }
+
+            animationFrameId = requestAnimationFrame(tick);
+        }
+
+        /**
+         * Registers button clicks, keyboard arrows, spacebar toggle, and mobile touch swipes.
+         */
+        function setupEventListeners() {
+            // Arrow Buttons
+            prevBtn.addEventListener('click', prevSlide);
+            nextBtn.addEventListener('click', nextSlide);
+
+            // Play/Pause Button
+            playPauseBtn.addEventListener('click', togglePlayPause);
+
+            // Keyboard Navigation (Left, Right, Spacebar)
+            document.addEventListener('keydown', (e) => {
+                // Avoid triggering if user is typing inside an input
+                if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+
+                if (e.key === 'ArrowRight') {
+                    e.preventDefault();
+                    nextSlide();
+                } else if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    prevSlide();
+                } else if (e.code === 'Space' || e.key === ' ') {
+                    e.preventDefault();
+                    togglePlayPause();
+                }
+            });
+
+            // Mobile Touch Swipe Support
+            carouselStage.addEventListener('touchstart', (e) => {
+                touchStartX = e.changedTouches[0].screenX;
+            }, { passive: true });
+
+            carouselStage.addEventListener('touchend', (e) => {
+                touchEndX = e.changedTouches[0].screenX;
+                handleSwipeGesture();
+            }, { passive: true });
+        }
+
+        /**
+         * Evaluates horizontal swipe distance on touch devices.
+         */
+        function handleSwipeGesture() {
+            const swipeThreshold = 45;
+            const diff = touchStartX - touchEndX;
+            if (Math.abs(diff) > swipeThreshold) {
+                if (diff > 0) {
+                    nextSlide(); // Swiped left -> Next
+                } else {
+                    prevSlide(); // Swiped right -> Prev
+                }
+            }
+        }
+
+        // Start application once DOM is ready
+        window.addEventListener('DOMContentLoaded', initGallery);
+    </script>
 </body>
 </html>
