@@ -3,411 +3,160 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>First-Person Template</title>
+<title>My Video Library</title>
 <style>
-  :root { --ink:#f2f4f7; --panel:rgba(14,18,24,.82); --edge:rgba(255,255,255,.18); color-scheme: dark; }
-  @media (prefers-color-scheme: light) { :root { --ink:#f2f4f7; --panel:rgba(14,18,24,.82); } }
-  html, body { margin:0; height:100%; overflow:hidden; background:#9fb7c9; font-family: system-ui, sans-serif; color:var(--ink); }
-  canvas { display:block; width:100%; height:100%; }
-  #overlay { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; cursor:pointer; background:rgba(8,10,14,.45); }
-  #card { background:var(--panel); border:1px solid var(--edge); border-radius:10px; padding:22px 28px; max-width:340px; line-height:1.5; }
-  #card h1 { margin:0 0 8px; font-size:20px; }
-  #card p { margin:4px 0; font-size:14px; }
-  kbd { background:rgba(255,255,255,.14); border-radius:4px; padding:1px 6px; font-size:12px; }
-  #cross { position:fixed; left:50%; top:50%; width:4px; height:4px; margin:-2px; border-radius:50%; background:#fff; mix-blend-mode:difference; pointer-events:none; }
-  #ratio { position:fixed; z-index:5; top:calc(12px + env(safe-area-inset-top,0px)); left:12px; width:230px; background:var(--panel); border:1px solid var(--edge); border-radius:8px; padding:8px 12px; font:12px system-ui, sans-serif; }
-  #ratio input { width:100%; margin:6px 0 2px; }
-  #ratio .hint { opacity:.7; margin-top:4px; }
-  #credit { position:fixed; right:12px; bottom:calc(12px + env(safe-area-inset-bottom,0px)); font:11px system-ui, sans-serif; background:var(--panel); padding:5px 9px; border-radius:6px; pointer-events:none; text-align:right; }
-  #hud { position:fixed; left:12px; bottom:calc(12px + env(safe-area-inset-bottom,0px)); font:12px ui-monospace, monospace; background:var(--panel); padding:6px 10px; border-radius:6px; pointer-events:none; }
+:root{--bg:#f7f6f3;--card:#fff;--text:#1f1f1d;--muted:#6b6a66;--accent:#d9622b;--border:#e2e0da;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#171716;--card:#232321;--text:#f0efeb;--muted:#9a9890;--accent:#ef8a55;--border:#38372f;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#171716;--card:#232321;--text:#f0efeb;--muted:#9a9890;--accent:#ef8a55;--border:#38372f;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:1000px;margin:0 auto;padding:24px 16px 48px}
+h1{margin:0 0 4px;font-size:1.6rem}
+.sub{color:var(--muted);margin:0 0 20px;font-size:.9rem}
+.player{background:#000;border-radius:12px;overflow:hidden;margin-bottom:8px;display:none}
+.player video{width:100%;max-height:70vh;display:block;background:#000}
+.now{display:none;margin:0 0 20px;font-weight:600;word-break:break-word}
+.drop{border:2px dashed var(--border);border-radius:12px;padding:28px 16px;text-align:center;background:var(--card);cursor:pointer;margin-bottom:24px;transition:border-color .15s}
+.drop.over,.drop:hover{border-color:var(--accent)}
+.drop strong{color:var(--accent)}
+.drop small{display:block;color:var(--muted);margin-top:6px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
+.item{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+.item.active{outline:2px solid var(--accent)}
+.thumb{position:relative;aspect-ratio:16/9;background:#000;cursor:pointer;border:0;padding:0;width:100%}
+.thumb video{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+.thumb span{position:absolute;inset:0;display:grid;place-items:center;font-size:2rem;color:#fff;background:rgba(0,0,0,.25)}
+.meta{padding:10px 12px;display:flex;gap:8px;align-items:center;justify-content:space-between}
+.meta div{min-width:0}
+.name{font-size:.9rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.size{font-size:.75rem;color:var(--muted)}
+button.del{background:none;border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:.8rem}
+button.del:hover{color:#c0392b;border-color:#c0392b}
+.empty,.msg{color:var(--muted);text-align:center;padding:20px}
+.msg{color:#c0392b;padding:0 0 12px}
 </style>
 </head>
 <body>
-<div id="cross"></div>
-<div id="hud"></div>
-<div id="credit"></div>
-<div id="ratio">
-  <label for="rs">Map scale</label>
-  <input id="rs" type="range">
-  <div id="rv"></div>
-  <div class="hint">Keys: <kbd>[</kbd> zoom in, <kbd>]</kbd> zoom out</div>
-</div>
-<div id="overlay"><div id="card">
-  <h1>First-person template</h1>
-  <p>Click to capture the mouse.</p>
-  <p><kbd>W A S D</kbd> move &nbsp; <kbd>Shift</kbd> sprint</p>
-  <p><kbd>Space</kbd> jump &nbsp; <kbd>C</kbd> crouch &nbsp; <kbd>Esc</kbd> release</p>
-  <p>Map scale: use the slider (press Esc first) or <kbd>[</kbd> <kbd>]</kbd>.</p>
-  <p>Allow location access to texture the ground with the map around you (1 km radius).</p>
-</div></div>
+<main>
+  <h1>My Video Library</h1>
+  <p class="sub">Add videos, and they’re saved in this browser so they’ll still be here next time you visit.</p>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <div class="player" id="playerWrap"><video id="player" controls playsinline></video></div>
+  <p class="now" id="now"></p>
+
+  <div class="msg" id="msg" hidden></div>
+  <div class="drop" id="drop" tabindex="0" role="button" aria-label="Add videos">
+    <strong>Click to add videos</strong> or drag and drop them here
+    <small>Stored privately on this device only</small>
+  </div>
+  <input type="file" id="file" accept="video/*" multiple hidden>
+
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty">No videos yet.</div>
+</main>
+
 <script>
-/* ================= CONFIG: tweak these ================= */
-const CFG = {
-  walkSpeed: 5, sprintSpeed: 8.5, crouchSpeed: 2.5,
-  groundAccel: 60,   // how fast you reach target speed on ground
-  airControl: 0.25,  // fraction of accel while airborne
-  jumpSpeed: 7.5, gravity: 22,
-  standHeight: 1.8, crouchHeight: 1.1, eyeOffset: 0.15, // eye = top of body - eyeOffset
-  radius: 0.35,
-  sensitivity: 0.0022, maxPitch: 89 * Math.PI / 180,
-  fov: 75, sprintFovBoost: 8,
-  bobAmount: 0.05, bobSpeed: 9,
-  mapZoom: 17,       // OSM tile zoom: higher = sharper source image but more requests (16 ≈ 36 tiles, 17 ≈ 100)
-  mapRadius: 1000,   // real-world metres of map loaded around you
-  mapUnitsPerMetre: 4, // MAP SCALE: real-world metres shown on each 1 m x 1 m floor square. 1 = true scale,
-                       // higher = smaller, sharper world (walkable radius = mapRadius / this)
-  ratioMin: 0.1, ratioMax: 100,  // slider range
-  defaultBuildingHeight: 9,      // metres, when OSM has no height or levels tag
-  levelHeight: 3.2               // metres per building:levels
-};
+(function(){
+  var DB_NAME='video-library', STORE='videos', db=null, memory=[], urls={}, activeId=null;
+  var $=function(id){return document.getElementById(id)};
+  var grid=$('grid'), player=$('player'), wrap=$('playerWrap'), now=$('now'), msg=$('msg');
 
-/* ================= Scene ================= */
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-document.body.prepend(renderer.domElement);
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x9fb7c9);
-scene.fog = new THREE.Fog(0x9fb7c9, 300, 1500);
-scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 0.9));
-const sun = new THREE.DirectionalLight(0xffffff, 0.6); sun.position.set(10, 20, 5); scene.add(sun);
-
-const camera = new THREE.PerspectiveCamera(CFG.fov, 1, 0.05, 4000);
-camera.rotation.order = 'YXZ';   // yaw first, then pitch: no roll
-
-/* ================= World (replace with your level) ================= */
-const solids = [], testMeshes = [];               // collision boxes (THREE.Box3)
-function addBox(x, y, z, w, h, d, color) { // x,z = center; y = bottom
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color }));
-  m.position.set(x, y + h / 2, z); scene.add(m); testMeshes.push(m);
-  solids.push(new THREE.Box3().setFromObject(m));
-}
-const floor = new THREE.Mesh(new THREE.PlaneGeometry(20000, 20000), new THREE.MeshLambertMaterial({ color: 0x6f8f6a }));
-floor.rotation.x = -Math.PI / 2; scene.add(floor);
-const grid = new THREE.GridHelper(200, 100, 0x000000, 0x000000); grid.position.y = 0.01;
-grid.material.opacity = 0.12; grid.material.transparent = true; scene.add(grid);
-addBox(0, 0, -8, 6, 1, 3, 0xc98f5a);       // low step
-addBox(0, 0, -12, 4, 2.2, 3, 0xb9744a);    // high step
-addBox(8, 0, -4, 2, 4, 10, 0x8a8fa8);      // wall
-addBox(-8, 0, -6, 3, 0.5, 3, 0xd9c36a);
-addBox(-8, 0, -10, 3, 1.5, 3, 0xd9a05a);
-addBox(-8, 0, -14, 3, 2.5, 3, 0xd97a5a);   // staircase of jumps
-
-/* ================= Player state ================= */
-const player = {
-  pos: new THREE.Vector3(0, 0, 6),   // feet position
-  vel: new THREE.Vector3(),
-  yaw: 0, pitch: 0,
-  height: CFG.standHeight,
-  grounded: false, bob: 0, fov: CFG.fov
-};
-
-/* ================= Input ================= */
-const keys = {};
-addEventListener('keydown', e => { keys[e.code] = true; if (e.code === 'Space') e.preventDefault(); });
-addEventListener('keyup',   e => { keys[e.code] = false; });
-addEventListener('blur',    () => { for (const k in keys) keys[k] = false; });
-
-const overlay = document.getElementById('overlay');
-let locked = false, dragLook = false;
-function look(dx, dy) {
-  player.yaw   -= dx * CFG.sensitivity;
-  player.pitch  = Math.max(-CFG.maxPitch, Math.min(CFG.maxPitch, player.pitch - dy * CFG.sensitivity));
-}
-overlay.addEventListener('click', () => {
-  overlay.style.display = 'none';
-  startLocation();
-  try { renderer.domElement.requestPointerLock(); } catch (e) {}
-  setTimeout(() => { if (!locked) dragLook = true; }, 300); // fallback if pointer lock is blocked
-});
-document.addEventListener('pointerlockchange', () => {
-  locked = document.pointerLockElement === renderer.domElement;
-  if (locked) dragLook = false; else if (!dragLook) overlay.style.display = 'flex';
-});
-addEventListener('mousemove', e => {
-  if (locked) look(e.movementX, e.movementY);
-  else if (dragLook && e.buttons && !e.target.closest('#ratio')) look(e.movementX, e.movementY);
-});
-addEventListener('keydown', e => { if (e.code === 'Escape' && dragLook) { dragLook = false; overlay.style.display = 'flex'; } });
-
-/* ================= Movement + collision ================= */
-function overlaps(b) {
-  const p = player.pos, r = CFG.radius;
-  return p.x + r > b.min.x && p.x - r < b.max.x &&
-         p.y + player.height > b.min.y && p.y < b.max.y &&
-         p.z + r > b.min.z && p.z - r < b.max.z;
-}
-// Move one axis at a time, then push out of anything we hit.
-function moveAxis(axis, amount) {
-  player.pos[axis] += amount;
-  for (const b of solids) {
-    if (!overlaps(b)) continue;
-    if (axis === 'y') {
-      if (amount <= 0) { player.pos.y = b.max.y; player.grounded = true; }
-      else player.pos.y = b.min.y - player.height;
-      player.vel.y = 0;
-    } else {
-      player.pos[axis] = amount > 0 ? b.min[axis] - CFG.radius : b.max[axis] + CFG.radius;
-      player.vel[axis] = 0;
-    }
-  }
-  collideBuildings(axis, amount);
-}
-
-function updatePlayer(dt) {
-  // crouch (blocked from standing up under a ceiling)
-  const wantCrouch = keys.KeyC || keys.ControlLeft;
-  const targetH = wantCrouch ? CFG.crouchHeight : CFG.standHeight;
-  if (targetH > player.height) {
-    const prev = player.height; player.height = targetH;
-    if (solids.some(overlaps)) player.height = prev;
-  } else player.height = targetH;
-  const crouching = player.height < CFG.standHeight - 0.01;
-
-  // wish direction relative to where we're looking
-  const fwd = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
-  const strafe = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
-  const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
-  let wx = strafe * cos - fwd * sin, wz = -strafe * sin - fwd * cos;
-  const len = Math.hypot(wx, wz); if (len > 0) { wx /= len; wz /= len; }
-
-  const sprinting = keys.ShiftLeft && fwd > 0 && !crouching;
-  const speed = crouching ? CFG.crouchSpeed : sprinting ? CFG.sprintSpeed : CFG.walkSpeed;
-  const accel = CFG.groundAccel * (player.grounded ? 1 : CFG.airControl) * dt;
-  const approach = (v, t) => v + Math.max(-accel, Math.min(accel, t - v));
-  player.vel.x = approach(player.vel.x, wx * speed);
-  player.vel.z = approach(player.vel.z, wz * speed);
-
-  // jump + gravity
-  if (keys.Space && player.grounded) player.vel.y = CFG.jumpSpeed;
-  player.vel.y -= CFG.gravity * dt;
-
-  // integrate with collision
-  player.grounded = false;
-  moveAxis('x', player.vel.x * dt);
-  moveAxis('z', player.vel.z * dt);
-  moveAxis('y', player.vel.y * dt);
-  const dist = Math.hypot(player.pos.x, player.pos.z);   // stay inside the mapped circle
-  const lim = CFG.mapRadius / mapRatio;
-  if (dist > lim) { player.pos.x *= lim / dist; player.pos.z *= lim / dist; }
-  if (player.pos.y <= 0) { player.pos.y = 0; player.vel.y = 0; player.grounded = true; }
-
-  // view effects: head bob + sprint FOV
-  const hSpeed = Math.hypot(player.vel.x, player.vel.z);
-  if (player.grounded) player.bob += hSpeed * dt * CFG.bobSpeed / CFG.walkSpeed;
-  const bobY = player.grounded ? Math.sin(player.bob) * CFG.bobAmount * Math.min(hSpeed / CFG.walkSpeed, 1) : 0;
-  const targetFov = CFG.fov + (sprinting && hSpeed > 1 ? CFG.sprintFovBoost : 0);
-  player.fov += (targetFov - player.fov) * Math.min(1, dt * 8);
-  if (Math.abs(camera.fov - player.fov) > 0.01) { camera.fov = player.fov; camera.updateProjectionMatrix(); }
-
-  // camera follows eye position
-  camera.position.set(player.pos.x, player.pos.y + player.height - CFG.eyeOffset + bobY, player.pos.z);
-  camera.rotation.set(player.pitch, player.yaw, 0);
-
-  document.getElementById('hud').textContent =
-    `speed ${hSpeed.toFixed(1)} m/s · ${player.grounded ? 'grounded' : 'airborne'}${crouching ? ' · crouching' : ''}${buildingStatus}`;
-}
-
-/* ================= Map ground (OpenStreetMap tiles) =================
-   World axes: +x = east, -z = north, 1 unit = 1 metre. The player's real location is (0, 0).
-   Test without GPS: add ?lat=43.6426&lon=-79.3871 to the URL. */
-/* Map scale: mapGroup is scaled about the origin (your real position), so changing the ratio
-   never moves you relative to the map. Floor metre = mapRatio real metres. */
-const mapGroup = new THREE.Group(); scene.add(mapGroup);          // ground texture (x/z scaled only)
-const bGroup = new THREE.Group(); scene.add(bGroup);              // buildings (scaled uniformly, so heights shrink too)
-let mapRatio = CFG.mapUnitsPerMetre;
-const rs = document.getElementById('rs'), rv = document.getElementById('rv');
-rs.min = Math.log10(CFG.ratioMin); rs.max = Math.log10(CFG.ratioMax); rs.step = 0.01;   // log slider
-function setRatio(r) {
-  mapRatio = Math.min(CFG.ratioMax, Math.max(CFG.ratioMin, r));
-  rs.value = Math.log10(mapRatio);
-  mapGroup.scale.set(1 / mapRatio, 1, 1 / mapRatio);           // keep height at 1 to avoid z-fighting
-  bGroup.scale.setScalar(1 / mapRatio);
-  const f = mapRatio >= 10 ? mapRatio.toFixed(0) : mapRatio.toFixed(1);
-  rv.textContent = `1 m × 1 m of floor = ${f} m × ${f} m of map (reach ${Math.round(CFG.mapRadius / mapRatio)} m)`;
-}
-rs.addEventListener('input', () => setRatio(10 ** rs.value));
-rs.addEventListener('change', () => rs.blur());                 // so Space/arrows go back to the game
-addEventListener('keydown', e => {
-  if (e.code === 'BracketLeft') setRatio(mapRatio / 1.1);
-  if (e.code === 'BracketRight') setRatio(mapRatio * 1.1);
-});
-setRatio(CFG.mapUnitsPerMetre);
-
-/* ================= Buildings (OSM footprints -> oriented boxes) =================
-   Each building becomes the smallest rotated rectangle around its footprint, extruded to its
-   real height (height tag, else building:levels, else CFG.defaultBuildingHeight).
-   Data stored in REAL metres; collision and rendering scale by 1 / mapRatio. */
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
-const buildings = [];
-let buildingStatus = '';
-
-function minRect(pts) {                       // pts: [[x, z], ...] -> {x, z, hx, hz, c, s, ang}
-  const P = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-  const lo = [], up = [];
-  for (const p of P) { while (lo.length > 1 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
-  for (let i = P.length - 1; i >= 0; i--) { const p = P[i]; while (up.length > 1 && cr(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
-  const H = lo.slice(0, -1).concat(up.slice(0, -1));          // convex hull
-  if (H.length < 3) return null;
-  let best = null;
-  for (let i = 0; i < H.length; i++) {                        // try each hull edge as the box's axis
-    const a = H[i], b = H[(i + 1) % H.length], ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
-    const c = Math.cos(ang), s = Math.sin(ang);
-    let u0 = 1e9, u1 = -1e9, v0 = 1e9, v1 = -1e9;
-    for (const p of H) {
-      const u = p[0] * c + p[1] * s, v = -p[0] * s + p[1] * c;
-      u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v);
-    }
-    const area = (u1 - u0) * (v1 - v0);
-    if (!best || area < best.area) best = { area, ang, c, s, u0, u1, v0, v1 };
-  }
-  const mu = (best.u0 + best.u1) / 2, mv = (best.v0 + best.v1) / 2;
-  return { x: mu * best.c - mv * best.s, z: mu * best.s + mv * best.c,
-           hx: (best.u1 - best.u0) / 2, hz: (best.v1 - best.v0) / 2, c: best.c, s: best.s, ang: best.ang };
-}
-
-function heightOf(t) {
-  const h = parseFloat(t.height); if (h > 0) return h;
-  const l = parseFloat(t['building:levels']); if (l > 0) return l * CFG.levelHeight;
-  return CFG.defaultBuildingHeight;
-}
-
-async function loadBuildings(lat, lon) {
-  buildingStatus = ' · loading buildings…';
-  try {
-    const q = `[out:json][timeout:30];way["building"](around:${CFG.mapRadius},${lat},${lon});out tags geom;`;
-    const res = await fetch(OVERPASS_URL, { method: 'POST', body: 'data=' + encodeURIComponent(q),
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    const kx = 111320 * Math.cos(lat * Math.PI / 180), kz = 111132;   // metres per degree
-    const list = [];
-    for (const w of data.elements) {
-      if (!w.geometry || w.geometry.length < 4) continue;
-      const r = minRect(w.geometry.map(g => [(g.lon - lon) * kx, -(g.lat - lat) * kz]));  // -z = north
-      if (!r || Math.hypot(r.x, r.z) > CFG.mapRadius) continue;
-      r.hx = Math.max(r.hx, 0.75); r.hz = Math.max(r.hz, 0.75);
-      r.h = heightOf(w.tags || {}); r.r = Math.hypot(r.hx, r.hz);
-      list.push(r);
-    }
-    if (!list.length) { buildingStatus = ' · no buildings found'; return; }
-
-    const geo = new THREE.BoxGeometry(1, 1, 1); geo.translate(0, 0.5, 0);   // unit cube sitting on y = 0
-    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), list.length);
-    mesh.frustumCulled = false;
-    const d = new THREE.Object3D(), col = new THREE.Color();
-    list.forEach((b, i) => {
-      d.position.set(b.x, 0, b.z); d.rotation.set(0, -b.ang, 0); d.scale.set(b.hx * 2, b.h, b.hz * 2);
-      d.updateMatrix(); mesh.setMatrixAt(i, d.matrix);
-      col.setHSL(0.09, 0.12, 0.74 - Math.min(b.h, 60) / 60 * 0.3 + ((i * 37) % 11) / 200);  // taller = darker
-      mesh.setColorAt(i, col);
+  function openDB(){
+    return new Promise(function(res){
+      try{
+        var req=indexedDB.open(DB_NAME,1);
+        req.onupgradeneeded=function(){req.result.createObjectStore(STORE,{keyPath:'id'})};
+        req.onsuccess=function(){res(req.result)};
+        req.onerror=function(){res(null)};
+      }catch(e){res(null)}
     });
-    bGroup.add(mesh);
-    buildings.push(...list);
-    testMeshes.forEach(m => scene.remove(m)); testMeshes.length = 0; solids.length = 0;   // drop the demo blocks
-    buildingStatus = ` · ${list.length} buildings`;
-  } catch (e) { buildingStatus = ' · buildings failed (' + e.message + ')'; }
-}
-
-// Circle (player) vs rotated box. Walk into the sides; land on and walk across the roof.
-function collideBuildings(axis, amount) {
-  const k = 1 / mapRatio, p = player.pos, rad = CFG.radius;
-  for (const b of buildings) {
-    const bx = b.x * k, bz = b.z * k, top = b.h * k, R = b.r * k + rad;
-    if (Math.abs(p.x - bx) > R || Math.abs(p.z - bz) > R || p.y >= top) continue;
-    const dx = p.x - bx, dz = p.z - bz, hx = b.hx * k, hz = b.hz * k;
-    const lx = dx * b.c + dz * b.s, lz = -dx * b.s + dz * b.c;           // player in box space
-    const ex = lx - Math.max(-hx, Math.min(hx, lx)), ez = lz - Math.max(-hz, Math.min(hz, lz));
-    const d2 = ex * ex + ez * ez;
-    if (d2 >= rad * rad) continue;
-    if (axis === 'y') { if (amount <= 0) { p.y = top; player.vel.y = 0; player.grounded = true; } continue; }
-    let px, pz;                                                           // push-out in box space
-    if (d2 > 1e-9) { const dd = Math.sqrt(d2); px = ex / dd * (rad - dd); pz = ez / dd * (rad - dd); }
-    else if (hx - Math.abs(lx) < hz - Math.abs(lz)) { px = Math.sign(lx || 1) * (hx - Math.abs(lx) + rad); pz = 0; }
-    else { px = 0; pz = Math.sign(lz || 1) * (hz - Math.abs(lz) + rad); }
-    const wx = px * b.c - pz * b.s, wz = px * b.s + pz * b.c, m = Math.hypot(wx, wz) || 1;
-    p.x += wx; p.z += wz;
-    const vn = (player.vel.x * wx + player.vel.z * wz) / m;               // cancel velocity into the wall
-    if (vn < 0) { player.vel.x -= wx / m * vn; player.vel.z -= wz / m * vn; }
   }
-}
-
-const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const credit = document.getElementById('credit');
-let locStarted = false;
-
-function startLocation() {
-  if (locStarted) return; locStarted = true;
-  const q = new URLSearchParams(location.search);
-  if (q.has('lat') && q.has('lon')) return loadMap(+q.get('lat'), +q.get('lon'));
-  if (!navigator.geolocation) { credit.textContent = 'Location not supported: using flat ground'; return; }
-  credit.textContent = 'Getting location…';
-  navigator.geolocation.getCurrentPosition(
-    p => loadMap(p.coords.latitude, p.coords.longitude),
-    e => { credit.textContent = 'Location unavailable (' + e.message + '): using flat ground'; },
-    { enableHighAccuracy: true, timeout: 15000 });
-}
-
-const loadImage = url => new Promise(res => {
-  const img = new Image(); img.crossOrigin = 'anonymous';
-  img.onload = () => res(img); img.onerror = () => res(null); img.src = url;
-});
-
-async function loadMap(lat, lon) {
-  loadBuildings(lat, lon);                                       // runs in parallel with the tiles
-  const rad = lat * Math.PI / 180, maxTex = Math.min(renderer.capabilities.maxTextureSize, 8192);
-  let z = CFG.mapZoom, n, mpp, cx, cy, x0, x1, y0, y1, cols, rows;
-  for (;; z--) {                                                 // lower the zoom until the mosaic fits in one texture
-    n = 2 ** z;
-    mpp = 156543.03392 * Math.cos(rad) / n;                      // real metres per source pixel
-    cx = (lon + 180) / 360 * n;                                  // fractional tile coords of the player
-    cy = (1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * n;
-    const rt = CFG.mapRadius / (mpp * 256);                      // radius in tiles
-    x0 = Math.floor(cx - rt); x1 = Math.floor(cx + rt);
-    y0 = Math.max(0, Math.floor(cy - rt)); y1 = Math.min(n - 1, Math.floor(cy + rt));
-    cols = x1 - x0 + 1; rows = y1 - y0 + 1;
-    if (Math.max(cols, rows) * 256 <= maxTex || z <= 12) break;
+  function tx(mode,fn){
+    return new Promise(function(res,rej){
+      if(!db){res(null);return}
+      try{
+        var t=db.transaction(STORE,mode), s=t.objectStore(STORE), r=fn(s);
+        t.oncomplete=function(){res(r&&r.result)};
+        t.onerror=t.onabort=function(){rej(t.error)};
+      }catch(e){rej(e)}
+    });
   }
-  credit.textContent = `Loading ${cols * rows} map tiles…`;
-
-  const canvas = document.createElement('canvas');
-  canvas.width = cols * 256; canvas.height = rows * 256;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#d8d4c8'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-  const jobs = [];
-  for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
-    const url = TILE_URL.replace('{z}', z).replace('{x}', ((tx % n) + n) % n).replace('{y}', ty);
-    jobs.push(loadImage(url).then(img => { if (img) ctx.drawImage(img, (tx - x0) * 256, (ty - y0) * 256); return !!img; }));
+  function fmt(b){
+    if(b<1048576)return Math.max(1,Math.round(b/1024))+' KB';
+    if(b<1073741824)return (b/1048576).toFixed(1)+' MB';
+    return (b/1073741824).toFixed(2)+' GB';
   }
-  const ok = (await Promise.all(jobs)).filter(Boolean).length;
-  if (!ok) { credit.textContent = 'Map tiles blocked or offline: using flat ground'; return; }
+  function showMsg(t){msg.textContent=t;msg.hidden=!t}
 
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-  const w = canvas.width * mpp, h = canvas.height * mpp;
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex }));
-  ground.rotation.x = -Math.PI / 2;                              // texture top = north = -z
-  ground.position.set(((cx - x0) * 256 * -1 + canvas.width / 2) * mpp, 0.02, ((cy - y0) * 256 * -1 + canvas.height / 2) * mpp);
-  mapGroup.add(ground);
-  grid.visible = false;
-  credit.innerHTML = `${lat.toFixed(4)}, ${lon.toFixed(4)} · © <a style="color:inherit" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors`;
-  credit.style.pointerEvents = 'auto';
-}
+  async function load(){
+    try{var all=await tx('readonly',function(s){return s.getAll()});memory=all||[]}catch(e){showMsg('Couldn’t read saved videos.')}
+    memory.sort(function(a,b){return b.added-a.added});
+    render();
+  }
+  function urlFor(v){
+    if(!urls[v.id])urls[v.id]=URL.createObjectURL(v.blob);
+    return urls[v.id];
+  }
+  function render(){
+    grid.textContent='';
+    $('empty').style.display=memory.length?'none':'block';
+    memory.forEach(function(v){
+      var item=document.createElement('div');item.className='item'+(v.id===activeId?' active':'');
+      var th=document.createElement('button');th.className='thumb';th.type='button';th.setAttribute('aria-label','Play '+v.name);
+      var vid=document.createElement('video');vid.muted=true;vid.preload='metadata';vid.src=urlFor(v)+'#t=0.5';
+      var ic=document.createElement('span');ic.textContent='\u25B6';
+      th.append(vid,ic);th.onclick=function(){play(v.id)};
+      var meta=document.createElement('div');meta.className='meta';
+      var info=document.createElement('div');
+      var n=document.createElement('div');n.className='name';n.textContent=v.name;n.title=v.name;
+      var sz=document.createElement('div');sz.className='size';sz.textContent=fmt(v.blob.size);
+      info.append(n,sz);
+      var del=document.createElement('button');del.className='del';del.textContent='Delete';
+      del.onclick=function(){remove(v.id)};
+      meta.append(info,del);item.append(th,meta);grid.append(item);
+    });
+  }
+  function play(id){
+    var v=memory.find(function(x){return x.id===id});if(!v)return;
+    activeId=id;player.src=urlFor(v);wrap.style.display='block';
+    now.style.display='block';now.textContent=v.name;
+    player.play().catch(function(){});
+    wrap.scrollIntoView({behavior:'smooth',block:'start'});render();
+  }
+  async function remove(id){
+    if(!confirm('Delete this video?'))return;
+    try{await tx('readwrite',function(s){return s.delete(id)})}catch(e){}
+    if(urls[id]){URL.revokeObjectURL(urls[id]);delete urls[id]}
+    memory=memory.filter(function(x){return x.id!==id});
+    if(activeId===id){player.pause();player.removeAttribute('src');player.load();wrap.style.display='none';now.style.display='none';activeId=null}
+    render();
+  }
+  async function add(files){
+    showMsg('');var skipped=0,failed=false;
+    for(var i=0;i<files.length;i++){
+      var f=files[i];
+      if(!f.type.startsWith('video/')){skipped++;continue}
+      var rec={id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),name:f.name,blob:f,added:Date.now()};
+      try{await tx('readwrite',function(s){return s.put(rec)})}catch(e){failed=true}
+      memory.unshift(rec);
+    }
+    if(!db||failed)showMsg('Saved for this session only — this browser blocked permanent storage.');
+    else if(skipped)showMsg(skipped+' file(s) skipped because they aren’t videos.');
+    render();
+  }
 
-/* ================= Loop ================= */
-function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
-addEventListener('resize', resize); resize();
+  var drop=$('drop'),input=$('file');
+  drop.onclick=function(){input.click()};
+  drop.onkeydown=function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();input.click()}};
+  input.onchange=function(){add(Array.from(input.files));input.value=''};
+  ['dragenter','dragover'].forEach(function(t){drop.addEventListener(t,function(e){e.preventDefault();drop.classList.add('over')})});
+  ['dragleave','drop'].forEach(function(t){drop.addEventListener(t,function(e){e.preventDefault();drop.classList.remove('over')})});
+  drop.addEventListener('drop',function(e){add(Array.from(e.dataTransfer.files))});
 
-let last = performance.now();
-(function frame(now) {
-  requestAnimationFrame(frame);
-  let dt = Math.min((now - last) / 1000, 0.1); last = now;
-  const steps = Math.ceil(dt / 0.016);          // substeps keep collisions stable on slow frames
-  for (let i = 0; i < steps; i++) updatePlayer(dt / steps);
-  renderer.render(scene, camera);
-})(last);
+  openDB().then(function(d){db=d;return load()});
+})();
 </script>
 </body>
 </html>
