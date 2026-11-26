@@ -1,1072 +1,413 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lumina — Curated Photography Showcase</title>
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Google Fonts: Inter & Playfair Display -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,500;1,400&display=swap" rel="stylesheet">
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
-                        serif: ['Playfair Display', 'serif'],
-                    },
-                    animation: {
-                        'ken-burns': 'kenBurns 12s ease-out forwards',
-                    },
-                    keyframes: {
-                        kenBurns: {
-                            '0%': { transform: 'scale(1.0)' },
-                            '100%': { transform: 'scale(1.07)' },
-                        }
-                    }
-                }
-            }
-        }
-    </script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>First-Person Template</title>
+<style>
+  :root { --ink:#f2f4f7; --panel:rgba(14,18,24,.82); --edge:rgba(255,255,255,.18); color-scheme: dark; }
+  @media (prefers-color-scheme: light) { :root { --ink:#f2f4f7; --panel:rgba(14,18,24,.82); } }
+  html, body { margin:0; height:100%; overflow:hidden; background:#9fb7c9; font-family: system-ui, sans-serif; color:var(--ink); }
+  canvas { display:block; width:100%; height:100%; }
+  #overlay { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; cursor:pointer; background:rgba(8,10,14,.45); }
+  #card { background:var(--panel); border:1px solid var(--edge); border-radius:10px; padding:22px 28px; max-width:340px; line-height:1.5; }
+  #card h1 { margin:0 0 8px; font-size:20px; }
+  #card p { margin:4px 0; font-size:14px; }
+  kbd { background:rgba(255,255,255,.14); border-radius:4px; padding:1px 6px; font-size:12px; }
+  #cross { position:fixed; left:50%; top:50%; width:4px; height:4px; margin:-2px; border-radius:50%; background:#fff; mix-blend-mode:difference; pointer-events:none; }
+  #ratio { position:fixed; z-index:5; top:calc(12px + env(safe-area-inset-top,0px)); left:12px; width:230px; background:var(--panel); border:1px solid var(--edge); border-radius:8px; padding:8px 12px; font:12px system-ui, sans-serif; }
+  #ratio input { width:100%; margin:6px 0 2px; }
+  #ratio .hint { opacity:.7; margin-top:4px; }
+  #credit { position:fixed; right:12px; bottom:calc(12px + env(safe-area-inset-bottom,0px)); font:11px system-ui, sans-serif; background:var(--panel); padding:5px 9px; border-radius:6px; pointer-events:none; text-align:right; }
+  #hud { position:fixed; left:12px; bottom:calc(12px + env(safe-area-inset-bottom,0px)); font:12px ui-monospace, monospace; background:var(--panel); padding:6px 10px; border-radius:6px; pointer-events:none; }
+</style>
 </head>
-<body class="bg-zinc-950 text-zinc-100 font-sans antialiased selection:bg-white/20 selection:text-white overflow-x-hidden min-h-screen flex flex-col justify-between">
-
-    <!-- Top Navigation / Header -->
-    <header class="fixed top-0 left-0 right-0 z-30 px-4 sm:px-8 py-5 flex items-center justify-between bg-gradient-to-b from-black/80 via-black/40 to-transparent pointer-events-none">
-        <div class="flex items-center gap-3 pointer-events-auto">
-            <div class="w-8 h-8 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center">
-                <i data-lucide="aperture" class="w-4 h-4 text-white"></i>
-            </div>
-            <div>
-                <h1 class="text-sm sm:text-base font-medium tracking-wider uppercase text-white">Lumina</h1>
-                <p class="text-[11px] text-zinc-400 tracking-widest uppercase hidden sm:block">Curated Visual Anthology</p>
-            </div>
-        </div>
-
-        <!-- Slide Counter & Autoplay Control -->
-        <div class="flex items-center gap-2 sm:gap-3 pointer-events-auto">
-            <!-- Change / Upload Own 5 Photos Button -->
-            <button id="open-upload-modal-btn" aria-label="Upload your own 5 pictures" title="Upload or manage your own 5 pictures"
-                class="group flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white text-zinc-950 hover:bg-zinc-200 active:scale-95 text-xs font-semibold tracking-wide shadow-lg shadow-black/40 transition-all duration-200 cursor-pointer">
-                <i data-lucide="image-plus" class="w-3.5 h-3.5 text-zinc-900"></i>
-                <span>My 5 Photos</span>
-            </button>
-
-            <!-- Slide Counter Pill -->
-            <div class="px-3.5 py-1.5 rounded-full bg-zinc-900/70 backdrop-blur-md border border-white/10 text-xs font-medium tracking-widest text-zinc-300 flex items-center gap-1.5">
-                <span id="current-slide-num" class="text-white font-semibold">01</span>
-                <span class="text-zinc-600">/</span>
-                <span id="total-slides-num" class="text-zinc-400">05</span>
-            </div>
-
-            <!-- Play / Pause Toggle Button -->
-            <button id="play-pause-btn" aria-label="Pause slideshow" title="Play/Pause (Spacebar)"
-                class="group flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-zinc-900/70 hover:bg-zinc-800/90 active:scale-95 backdrop-blur-md border border-white/10 hover:border-white/25 text-xs font-medium text-zinc-200 transition-all duration-200 cursor-pointer">
-                <span id="play-pause-icon" class="flex items-center justify-center">
-                    <i data-lucide="pause" class="w-3.5 h-3.5 text-white"></i>
-                </span>
-                <span id="play-pause-text" class="hidden sm:inline tracking-wide">Playing</span>
-            </button>
-        </div>
-    </header>
-
-    <!-- Main Fullscreen Carousel Stage -->
-    <main id="carousel-stage" class="relative w-full h-screen min-h-[560px] flex items-center justify-center overflow-hidden select-none">
-        
-        <!-- Slides Container (Populated via JS) -->
-        <div id="slides-wrapper" class="relative w-full h-full">
-            <!-- Slide items injected dynamically -->
-        </div>
-
-        <!-- Subtle Vignette Overlays for Text Contrast -->
-        <div class="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/25 to-black/30 pointer-events-none z-10"></div>
-        <div class="absolute inset-0 bg-radial from-transparent to-black/40 pointer-events-none z-10"></div>
-
-        <!-- Left / Previous Arrow Button -->
-        <button id="prev-btn" aria-label="Previous slide" title="Previous Slide (Left Arrow)"
-            class="absolute left-3 sm:left-8 top-1/2 -translate-y-1/2 z-20 p-3 sm:p-4 rounded-full bg-black/40 hover:bg-black/70 active:scale-95 backdrop-blur-md border border-white/10 hover:border-white/30 text-white/80 hover:text-white transition-all duration-200 cursor-pointer group focus:outline-none focus:ring-2 focus:ring-white/40">
-            <i data-lucide="chevron-left" class="w-5 h-5 sm:w-6 sm:h-6 transition-transform duration-200 group-hover:-translate-x-0.5"></i>
-        </button>
-
-        <!-- Right / Next Arrow Button -->
-        <button id="next-btn" aria-label="Next slide" title="Next Slide (Right Arrow)"
-            class="absolute right-3 sm:right-8 top-1/2 -translate-y-1/2 z-20 p-3 sm:p-4 rounded-full bg-black/40 hover:bg-black/70 active:scale-95 backdrop-blur-md border border-white/10 hover:border-white/30 text-white/80 hover:text-white transition-all duration-200 cursor-pointer group focus:outline-none focus:ring-2 focus:ring-white/40">
-            <i data-lucide="chevron-right" class="w-5 h-5 sm:w-6 sm:h-6 transition-transform duration-200 group-hover:translate-x-0.5"></i>
-        </button>
-
-        <!-- Bottom Overlay: Captions, Progress Bar, and Thumbnails/Dots -->
-        <div class="absolute bottom-0 left-0 right-0 z-20 px-4 sm:px-8 pb-6 sm:pb-8 pt-12 flex flex-col gap-5 max-w-7xl mx-auto">
-            
-            <!-- Caption & Metadata Row -->
-            <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
-                <div id="caption-container" class="max-w-2xl transition-all duration-500 transform translate-y-0 opacity-100">
-                    <div class="flex items-center gap-2.5 mb-2">
-                        <span id="slide-category" class="px-2.5 py-0.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/10 text-[11px] font-medium tracking-widest uppercase text-zinc-200">
-                            Landscape
-                        </span>
-                        <span id="slide-location" class="text-xs text-zinc-400 flex items-center gap-1">
-                            <i data-lucide="map-pin" class="w-3 h-3 text-zinc-400"></i>
-                            <span>Yosemite Valley, CA</span>
-                        </span>
-                    </div>
-                    <!-- Inline Editable Title -->
-                    <div class="group/title relative inline-flex items-center gap-2 max-w-full">
-                        <h2 id="slide-title" contenteditable="true" spellcheck="false" title="Click to edit title"
-                            class="font-serif text-2xl sm:text-4xl lg:text-5xl font-medium text-white tracking-tight leading-tight mb-1.5 rounded-lg px-1 -mx-1 outline-none focus:bg-white/10 focus:ring-1 focus:ring-white/30 transition-colors cursor-text">
-                            Morning Mist Over El Capitan
-                        </h2>
-                        <i data-lucide="pencil" class="w-4 h-4 text-white/40 opacity-0 group-hover/title:opacity-100 transition-opacity flex-shrink-0 pointer-events-none"></i>
-                    </div>
-                    <!-- Inline Editable Description -->
-                    <p id="slide-description" contenteditable="true" spellcheck="false" title="Click to edit caption"
-                        class="text-xs sm:text-sm text-zinc-300/90 font-light leading-relaxed max-w-xl rounded-md px-1 -mx-1 outline-none focus:bg-white/10 focus:ring-1 focus:ring-white/25 transition-colors cursor-text">
-                        Golden hour light pierces through the low-lying valley fog as granite monoliths emerge against a crisp alpine sky.
-                    </p>
-                </div>
-
-                <!-- Keyboard Shortcut Hint (Desktop) -->
-                <div class="hidden lg:flex items-center gap-3 text-[11px] text-zinc-400/80 pb-1">
-                    <span class="flex items-center gap-1.5">
-                        <kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/15 font-mono text-[10px] text-zinc-300">←</kbd>
-                        <kbd class="px-1.5 py-0.5 rounded bg-white/10 border border-white/15 font-mono text-[10px] text-zinc-300">→</kbd>
-                        <span>Navigate</span>
-                    </span>
-                    <span class="text-zinc-700">•</span>
-                    <span class="flex items-center gap-1.5">
-                        <kbd class="px-2 py-0.5 rounded bg-white/10 border border-white/15 font-mono text-[10px] text-zinc-300">Space</kbd>
-                        <span>Pause / Play</span>
-                    </span>
-                </div>
-            </div>
-
-            <!-- Subtle Progress Bar -->
-            <div class="w-full h-1 bg-white/15 rounded-full overflow-hidden backdrop-blur-sm">
-                <div id="progress-bar" class="h-full bg-white rounded-full w-0 transition-none"></div>
-            </div>
-
-            <!-- Bottom Navigation Controls: Thumbnail Strip + Pagination Dots -->
-            <div class="flex flex-col sm:flex-row items-center justify-between gap-4 pt-1">
-                
-                <!-- 5 Clickable Thumbnail Previews with Individual Replace Action -->
-                <div class="flex items-center gap-2.5 sm:gap-3 max-w-full">
-                    <div id="thumbnails-container" class="flex items-center gap-2.5 sm:gap-3 overflow-x-auto max-w-full py-1.5 px-1">
-                        <!-- Thumbnails injected dynamically -->
-                    </div>
-                    <!-- Quick Bulk File Picker Button beside thumbnails -->
-                    <button id="quick-bulk-upload-btn" type="button" title="Select up to 5 photos from your device"
-                        class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 active:scale-95 backdrop-blur-md border border-white/15 text-xs font-medium text-zinc-200 transition-all cursor-pointer flex-shrink-0">
-                        <i data-lucide="upload" class="w-3.5 h-3.5"></i>
-                        <span class="hidden md:inline">Upload 5</span>
-                    </button>
-                </div>
-
-                <!-- 5 Clickable Pagination Dots (Synced with thumbnails) -->
-                <div id="dots-container" class="flex items-center gap-2" role="tablist" aria-label="Slide pagination">
-                    <!-- Dots injected dynamically -->
-                </div>
-
-            </div>
-        </div>
-
-        <!-- Full-Stage Drag & Drop Visual Overlay -->
-        <div id="stage-drop-overlay" class="fixed inset-0 z-40 bg-zinc-950/85 backdrop-blur-md border-2 border-dashed border-white/40 m-4 rounded-3xl hidden flex-col items-center justify-center text-center p-6 pointer-events-none transition-opacity duration-200">
-            <div class="w-16 h-16 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center mb-4">
-                <i data-lucide="images" class="w-8 h-8 text-white"></i>
-            </div>
-            <h3 class="font-serif text-2xl sm:text-3xl text-white mb-2">Drop up to 5 Photos Here</h3>
-            <p class="text-sm text-zinc-300 max-w-md">Release your image files to immediately load them into your 5-slide showcase.</p>
-        </div>
-    </main>
-
-    <!-- Hidden File Inputs (Bulk 5-file input + Single-slot replace input) -->
-    <input type="file" id="bulk-file-input" accept="image/*" multiple class="hidden" />
-    <input type="file" id="single-slot-file-input" accept="image/*" class="hidden" />
-
-    <!-- Custom Photos Manager Modal (Drag-and-Drop, Bulk Upload, Individual Slots, or Custom URLs) -->
-    <div id="photos-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md overflow-y-auto">
-        <div class="relative w-full max-w-3xl bg-zinc-900 border border-white/15 rounded-2xl shadow-2xl overflow-hidden my-auto">
-            
-            <!-- Modal Header -->
-            <div class="px-6 py-5 border-b border-white/10 flex items-center justify-between">
-                <div class="flex items-center gap-3">
-                    <div class="w-9 h-9 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center">
-                        <i data-lucide="gallery-horizontal-end" class="w-4 h-4 text-white"></i>
-                    </div>
-                    <div>
-                        <h3 class="text-base sm:text-lg font-semibold text-white">Customize Your 5 Pictures</h3>
-                        <p class="text-xs text-zinc-400">Upload local photos, drag & drop, or paste image URLs</p>
-                    </div>
-                </div>
-                <button id="close-modal-btn" aria-label="Close modal" class="p-2 rounded-full bg-white/5 hover:bg-white/15 text-zinc-400 hover:text-white transition-colors cursor-pointer">
-                    <i data-lucide="x" class="w-5 h-5"></i>
-                </button>
-            </div>
-
-            <!-- Modal Body -->
-            <div class="p-6 space-y-6 max-h-[78vh] overflow-y-auto">
-                
-                <!-- Prominent Drag-and-Drop & Bulk Choose Zone -->
-                <div id="modal-drop-zone" class="group relative rounded-2xl border-2 border-dashed border-white/20 hover:border-white/50 bg-zinc-950/60 hover:bg-zinc-950/90 p-6 sm:p-8 text-center transition-all cursor-pointer">
-                    <div class="w-12 h-12 rounded-2xl bg-white/10 group-hover:bg-white/15 border border-white/15 flex items-center justify-center mx-auto mb-3 transition-transform group-hover:scale-105">
-                        <i data-lucide="upload-cloud" class="w-6 h-6 text-white"></i>
-                    </div>
-                    <h4 class="text-sm sm:text-base font-medium text-white mb-1">Choose up to 5 Pictures or Drag & Drop</h4>
-                    <p class="text-xs text-zinc-400 mb-4 max-w-md mx-auto">Select 1 to 5 images from your device at once. Titles are automatically generated from your filenames.</p>
-                    <span class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white text-zinc-950 text-xs font-semibold tracking-wide shadow-md group-hover:bg-zinc-200 transition-colors">
-                        <i data-lucide="folder-open" class="w-3.5 h-3.5"></i>
-                        <span>Browse Device Files</span>
-                    </span>
-                </div>
-
-                <!-- 5 Individual Slot Cards (Upload individually, edit title, or paste URL) -->
-                <div>
-                    <div class="flex items-center justify-between mb-3">
-                        <span class="text-xs font-semibold uppercase tracking-wider text-zinc-400">Individual Photo Slots (01 – 05)</span>
-                        <button id="reset-defaults-btn" type="button" class="text-xs text-zinc-400 hover:text-white underline underline-offset-4 transition-colors cursor-pointer">
-                            Reset to Sample Photos
-                        </button>
-                    </div>
-                    <div id="modal-slots-list" class="space-y-3">
-                        <!-- 5 slot rows injected dynamically -->
-                    </div>
-                </div>
-            </div>
-
-            <!-- Modal Footer -->
-            <div class="px-6 py-4 bg-zinc-950/80 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-3">
-                <p class="text-[11px] text-zinc-400 flex items-center gap-1.5">
-                    <i data-lucide="shield-check" class="w-3.5 h-3.5 text-emerald-400"></i>
-                    <span>Local photos stay private in your browser memory—no server upload required.</span>
-                </p>
-                <button id="done-modal-btn" type="button" class="w-full sm:w-auto px-5 py-2 rounded-full bg-white text-zinc-950 hover:bg-zinc-200 text-xs font-semibold tracking-wide transition-colors cursor-pointer">
-                    Start Slideshow
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Subtle Toast Notification Banner -->
-    <div id="toast-banner" class="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-full bg-zinc-900/95 border border-white/20 text-xs font-medium text-white shadow-2xl backdrop-blur-md flex items-center gap-2 opacity-0 pointer-events-none transition-all duration-300 translate-y-2">
-        <i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-400"></i>
-        <span id="toast-message">Updated your 5 photos</span>
-    </div>
-
-    <!-- Application Logic -->
-    <script>
-        const STORAGE_KEY = 'lumina_custom_5_slides_v1';
-
-        /**
-         * Default curated collection of 5 high-resolution photographs preloaded on first visit.
-         */
-        const DEFAULT_SLIDES_DATA = [
-            {
-                id: 1015,
-                title: "Emerald Fjord & Silent Waters",
-                category: "Scenic Landscape",
-                location: "Geirangerfjord, Norway",
-                description: "Glacial waters wind through steep, emerald-clad cliffs under an overcast Nordic sky, creating mirror-like reflections.",
-                imageUrl: "https://picsum.photos/id/1015/1920/1080",
-                thumbUrl: "https://picsum.photos/id/1015/240/150",
-                fallbackColor: "18181b",
-                isLocalBlob: false
-            },
-            {
-                id: 1036,
-                title: "High Altitude Solitude",
-                category: "Alpine Nature",
-                location: "Bernese Oberland, Switzerland",
-                description: "Fresh powder blankets jagged limestone ridges as crisp winter sunlight illuminates the untouched alpine expanse.",
-                imageUrl: "https://picsum.photos/id/1036/1920/1080",
-                thumbUrl: "https://picsum.photos/id/1036/240/150",
-                fallbackColor: "27272a",
-                isLocalBlob: false
-            },
-            {
-                id: 1067,
-                title: "Metropolis at Dusk",
-                category: "Urban Architecture",
-                location: "Downtown Skyline",
-                description: "Geometric glass facades catch the last warm embers of twilight while city avenues awaken below.",
-                imageUrl: "https://picsum.photos/id/1067/1920/1080",
-                thumbUrl: "https://picsum.photos/id/1067/240/150",
-                fallbackColor: "1e1b4b",
-                isLocalBlob: false
-            },
-            {
-                id: 1018,
-                title: "Highland Valley Passage",
-                category: "Wilderness",
-                location: "Isle of Skye, Scotland",
-                description: "Sweeping heather valleys and dramatic mountain passes shaped by centuries of wind, mist, and rain.",
-                imageUrl: "https://picsum.photos/id/1018/1920/1080",
-                thumbUrl: "https://picsum.photos/id/1018/240/150",
-                fallbackColor: "14532d",
-                isLocalBlob: false
-            },
-            {
-                id: 1043,
-                title: "Autumn Canopy & Mist",
-                category: "Forestry",
-                location: "Cascade Range, Oregon",
-                description: "Golden foliage contrasts with deep evergreen pines as morning fog drifts quietly through the timberline.",
-                imageUrl: "https://picsum.photos/id/1043/1920/1080",
-                thumbUrl: "https://picsum.photos/id/1043/240/150",
-                fallbackColor: "451a03",
-                isLocalBlob: false
-            }
-        ];
-
-        // Active mutable array of 5 slides
-        let SLIDES_DATA = [];
-
-        // Slideshow Configuration
-        const SLIDE_DURATION_MS = 6000; // 6 seconds per slide
-
-        // State Variables
-        let currentIndex = 0;
-        let isPlaying = true;
-        let elapsedBeforePause = 0;
-        let lastFrameTime = null;
-        let animationFrameId = null;
-        let pendingSlotReplaceIndex = null;
-        let toastTimeoutId = null;
-
-        // Touch / Swipe Gesture State
-        let touchStartX = 0;
-        let touchEndX = 0;
-
-        // DOM Elements
-        const slidesWrapper = document.getElementById('slides-wrapper');
-        const thumbnailsContainer = document.getElementById('thumbnails-container');
-        const dotsContainer = document.getElementById('dots-container');
-        const progressBar = document.getElementById('progress-bar');
-        const currentSlideNumEl = document.getElementById('current-slide-num');
-        const totalSlidesNumEl = document.getElementById('total-slides-num');
-        const playPauseBtn = document.getElementById('play-pause-btn');
-        const playPauseIcon = document.getElementById('play-pause-icon');
-        const playPauseText = document.getElementById('play-pause-text');
-        const prevBtn = document.getElementById('prev-btn');
-        const nextBtn = document.getElementById('next-btn');
-        const carouselStage = document.getElementById('carousel-stage');
-
-        // Upload & Modal DOM Elements
-        const openUploadModalBtn = document.getElementById('open-upload-modal-btn');
-        const quickBulkUploadBtn = document.getElementById('quick-bulk-upload-btn');
-        const photosModal = document.getElementById('photos-modal');
-        const closeModalBtn = document.getElementById('close-modal-btn');
-        const doneModalBtn = document.getElementById('done-modal-btn');
-        const modalDropZone = document.getElementById('modal-drop-zone');
-        const modalSlotsList = document.getElementById('modal-slots-list');
-        const resetDefaultsBtn = document.getElementById('reset-defaults-btn');
-        const bulkFileInput = document.getElementById('bulk-file-input');
-        const singleSlotFileInput = document.getElementById('single-slot-file-input');
-        const stageDropOverlay = document.getElementById('stage-drop-overlay');
-        const toastBanner = document.getElementById('toast-banner');
-        const toastMessage = document.getElementById('toast-message');
-
-        // Caption DOM Elements
-        const captionContainer = document.getElementById('caption-container');
-        const slideCategoryEl = document.getElementById('slide-category');
-        const slideLocationEl = document.getElementById('slide-location').querySelector('span');
-        const slideTitleEl = document.getElementById('slide-title');
-        const slideDescriptionEl = document.getElementById('slide-description');
-
-        /**
-         * Loads saved slides from localStorage if available, otherwise clones defaults.
-         */
-        function loadInitialSlides() {
-            try {
-                const savedRaw = localStorage.getItem(STORAGE_KEY);
-                if (savedRaw) {
-                    const parsed = JSON.parse(savedRaw);
-                    if (Array.isArray(parsed) && parsed.length === 5) {
-                        SLIDES_DATA = parsed;
-                        return;
-                    }
-                }
-            } catch (e) {
-                console.warn("Could not read saved slides from localStorage:", e);
-            }
-            SLIDES_DATA = DEFAULT_SLIDES_DATA.map(item => ({ ...item }));
-        }
-
-        /**
-         * Persists slide metadata/URLs (or compact DataURLs) to localStorage safely.
-         */
-        function persistSlidesToStorage() {
-            try {
-                // Avoid storing huge raw blob: URLs that expire across reloads; keep URLs & metadata
-                const serializable = SLIDES_DATA.map((slide, idx) => {
-                    if (slide.isLocalBlob) {
-                        // Fallback to default image on future page reloads if blob wasn't persisted
-                        return {
-                            ...DEFAULT_SLIDES_DATA[idx],
-                            title: slide.title,
-                            description: slide.description
-                        };
-                    }
-                    return slide;
-                });
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(serializable));
-            } catch (e) {
-                // QuotaExceededError or private mode: gracefully continue in memory
-                console.warn("LocalStorage quota limit reached; keeping high-res photos in active session memory.");
-            }
-        }
-
-        /**
-         * Cleans an image filename into a human-friendly title (e.g. "sunset_beach-2026.jpg" -> "Sunset Beach 2026").
-         */
-        function formatFilenameToTitle(filename) {
-            if (!filename) return "Custom Photograph";
-            const withoutExt = filename.replace(/\.[^/.]+$/, "");
-            const spaced = withoutExt.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
-            if (!spaced) return "Custom Photograph";
-            return spaced.replace(/\b\w/g, char => char.toUpperCase());
-        }
-
-        /**
-         * Displays a brief non-intrusive toast message.
-         */
-        function showToast(message) {
-            toastMessage.textContent = message;
-            toastBanner.classList.remove('opacity-0', 'translate-y-2');
-            toastBanner.classList.add('opacity-100', 'translate-y-0');
-
-            clearTimeout(toastTimeoutId);
-            toastTimeoutId = setTimeout(() => {
-                toastBanner.classList.remove('opacity-100', 'translate-y-0');
-                toastBanner.classList.add('opacity-0', 'translate-y-2');
-            }, 3200);
-        }
-
-        /**
-         * Initializes the gallery DOM elements, event listeners, and starts playback.
-         */
-        function initGallery() {
-            try {
-                loadInitialSlides();
-                totalSlidesNumEl.textContent = String(SLIDES_DATA.length).padStart(2, '0');
-                renderSlides();
-                renderThumbnailsAndDots();
-                renderModalSlots();
-                updateUI(0, false);
-                setupEventListeners();
-                lucide.createIcons();
-                startAnimationLoop();
-            } catch (error) {
-                console.error("Failed to initialize photography showcase:", error);
-            }
-        }
-
-        /**
-         * Creates all 5 full-bleed image layers in the DOM for smooth crossfade transitions.
-         */
-        function renderSlides() {
-            slidesWrapper.innerHTML = '';
-            SLIDES_DATA.forEach((slide, index) => {
-                const slideDiv = document.createElement('div');
-                slideDiv.className = `slide-item absolute inset-0 w-full h-full transition-opacity duration-1000 ease-in-out ${
-                    index === currentIndex ? 'opacity-100 z-0' : 'opacity-0 -z-10 pointer-events-none'
-                }`;
-                slideDiv.dataset.index = index;
-
-                const img = document.createElement('img');
-                img.src = slide.imageUrl;
-                img.alt = slide.title;
-                img.className = `w-full h-full object-cover object-center ${index === currentIndex ? 'animate-ken-burns' : ''}`;
-                img.loading = index === 0 ? 'eager' : 'lazy';
-                
-                img.onerror = function () {
-                    this.onerror = null;
-                    this.src = `https://placehold.co/1920x1080/${slide.fallbackColor || '18181b'}/ffffff?text=${encodeURIComponent(slide.title)}`;
-                };
-
-                slideDiv.appendChild(img);
-                slidesWrapper.appendChild(slideDiv);
-            });
-        }
-
-        /**
-         * Creates the 5 clickable thumbnail previews (with individual replace hover button) and 5 pagination dots.
-         */
-        function renderThumbnailsAndDots() {
-            thumbnailsContainer.innerHTML = '';
-            dotsContainer.innerHTML = '';
-
-            SLIDES_DATA.forEach((slide, index) => {
-                // 1. Thumbnail Wrapper
-                const thumbWrapper = document.createElement('div');
-                thumbWrapper.className = 'relative group/thumb flex-shrink-0';
-
-                const thumbBtn = document.createElement('button');
-                thumbBtn.type = 'button';
-                thumbBtn.ariaLabel = `View slide ${index + 1}: ${slide.title}`;
-                thumbBtn.className = `thumb-btn relative rounded-lg overflow-hidden w-14 h-9 sm:w-20 sm:h-12 flex-shrink-0 transition-all duration-300 cursor-pointer focus:outline-none ${
-                    index === currentIndex
-                        ? 'ring-2 ring-white scale-105 opacity-100 shadow-lg shadow-black/50'
-                        : 'ring-1 ring-white/20 opacity-55 hover:opacity-95 hover:scale-102'
-                }`;
-                thumbBtn.addEventListener('click', () => goToSlide(index));
-
-                const thumbImg = document.createElement('img');
-                thumbImg.src = slide.thumbUrl || slide.imageUrl;
-                thumbImg.alt = `Thumbnail for ${slide.title}`;
-                thumbImg.className = 'w-full h-full object-cover';
-                thumbImg.onerror = function () {
-                    this.onerror = null;
-                    this.src = `https://placehold.co/240x150/${slide.fallbackColor || '18181b'}/ffffff?text=${index + 1}`;
-                };
-
-                const thumbOverlay = document.createElement('div');
-                thumbOverlay.className = `thumb-overlay absolute inset-0 bg-black/30 transition-opacity duration-300 ${
-                    index === currentIndex ? 'opacity-0' : 'opacity-100 group-hover/thumb:opacity-0'
-                }`;
-
-                thumbBtn.appendChild(thumbImg);
-                thumbBtn.appendChild(thumbOverlay);
-
-                // Subtle individual replace/upload button on corner of thumbnail
-                const swapBtn = document.createElement('button');
-                swapBtn.type = 'button';
-                swapBtn.title = `Replace Photo #${index + 1}`;
-                swapBtn.ariaLabel = `Replace photo ${index + 1}`;
-                swapBtn.className = 'absolute -top-1.5 -right-1.5 z-10 w-5 h-5 rounded-full bg-zinc-900/95 hover:bg-white text-white hover:text-zinc-950 border border-white/25 flex items-center justify-center opacity-85 sm:opacity-0 sm:group-hover/thumb:opacity-100 transition-all duration-200 shadow-md cursor-pointer';
-                swapBtn.innerHTML = '<i data-lucide="camera" class="w-2.5 h-2.5"></i>';
-                swapBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    triggerSingleSlotUpload(index);
-                });
-
-                thumbWrapper.appendChild(thumbBtn);
-                thumbWrapper.appendChild(swapBtn);
-                thumbnailsContainer.appendChild(thumbWrapper);
-
-                // 2. Pagination Dot Button
-                const dotBtn = document.createElement('button');
-                dotBtn.type = 'button';
-                dotBtn.role = 'tab';
-                dotBtn.ariaSelected = index === currentIndex ? 'true' : 'false';
-                dotBtn.ariaLabel = `Go to slide ${index + 1}`;
-                dotBtn.className = `dot-btn h-2 rounded-full transition-all duration-300 cursor-pointer focus:outline-none ${
-                    index === currentIndex
-                        ? 'w-7 bg-white'
-                        : 'w-2 bg-white/35 hover:bg-white/70'
-                }`;
-                dotBtn.addEventListener('click', () => goToSlide(index));
-                dotsContainer.appendChild(dotBtn);
-            });
-
-            lucide.createIcons();
-        }
-
-        /**
-         * Renders the 5 interactive slot rows inside the "Customize Your 5 Pictures" modal.
-         */
-        function renderModalSlots() {
-            if (!modalSlotsList) return;
-            modalSlotsList.innerHTML = '';
-
-            SLIDES_DATA.forEach((slide, index) => {
-                const row = document.createElement('div');
-                row.className = 'flex flex-col sm:flex-row sm:items-center gap-3 p-3 rounded-xl bg-zinc-950/70 border border-white/10 hover:border-white/20 transition-colors';
-
-                // Left: Slot number & thumbnail preview
-                const previewGroup = document.createElement('div');
-                previewGroup.className = 'flex items-center gap-3 flex-shrink-0';
-
-                const numBadge = document.createElement('span');
-                numBadge.className = 'text-xs font-mono font-semibold text-zinc-400 w-5';
-                numBadge.textContent = String(index + 1).padStart(2, '0');
-
-                const imgBox = document.createElement('div');
-                imgBox.className = 'relative w-16 h-11 rounded-lg overflow-hidden bg-zinc-900 border border-white/15 flex-shrink-0';
-                const img = document.createElement('img');
-                img.src = slide.thumbUrl || slide.imageUrl;
-                img.alt = slide.title;
-                img.className = 'w-full h-full object-cover';
-                img.onerror = function () {
-                    this.onerror = null;
-                    this.src = `https://placehold.co/160x110/18181b/ffffff?text=${index + 1}`;
-                };
-                imgBox.appendChild(img);
-
-                previewGroup.appendChild(numBadge);
-                previewGroup.appendChild(imgBox);
-
-                // Middle: Editable Title & Image URL inputs
-                const inputsGroup = document.createElement('div');
-                inputsGroup.className = 'flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2';
-
-                const titleInput = document.createElement('input');
-                titleInput.type = 'text';
-                titleInput.value = slide.title;
-                titleInput.placeholder = `Photo ${index + 1} Title`;
-                titleInput.ariaLabel = `Photo ${index + 1} title`;
-                titleInput.className = 'w-full px-3 py-1.5 rounded-lg bg-zinc-900 border border-white/10 focus:border-white/40 text-xs text-white placeholder-zinc-500 outline-none transition-colors';
-                titleInput.addEventListener('input', (e) => {
-                    SLIDES_DATA[index].title = e.target.value || `Photo ${index + 1}`;
-                    persistSlidesToStorage();
-                    if (index === currentIndex) {
-                        slideTitleEl.textContent = SLIDES_DATA[index].title;
-                    }
-                });
-
-                const urlInput = document.createElement('input');
-                urlInput.type = 'url';
-                urlInput.value = slide.isLocalBlob ? '' : slide.imageUrl;
-                urlInput.placeholder = slide.isLocalBlob ? 'Loaded from device file' : 'Paste image URL (https://...)';
-                urlInput.ariaLabel = `Photo ${index + 1} image URL`;
-                urlInput.className = 'w-full px-3 py-1.5 rounded-lg bg-zinc-900 border border-white/10 focus:border-white/40 text-xs text-zinc-300 placeholder-zinc-500 outline-none transition-colors';
-                urlInput.addEventListener('change', (e) => {
-                    const val = e.target.value.trim();
-                    if (val) {
-                        applyImageToSlot(index, val, val, SLIDES_DATA[index].title, false);
-                        showToast(`Updated Photo #${index + 1} from URL`);
-                    }
-                });
-
-                inputsGroup.appendChild(titleInput);
-                inputsGroup.appendChild(urlInput);
-
-                // Right: Replace File Button
-                const replaceBtn = document.createElement('button');
-                replaceBtn.type = 'button';
-                replaceBtn.className = 'flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white hover:text-zinc-950 text-xs font-medium text-white border border-white/10 transition-colors cursor-pointer flex-shrink-0';
-                replaceBtn.innerHTML = '<i data-lucide="image-up" class="w-3.5 h-3.5"></i><span>Choose File</span>';
-                replaceBtn.addEventListener('click', () => triggerSingleSlotUpload(index));
-
-                row.appendChild(previewGroup);
-                row.appendChild(inputsGroup);
-                row.appendChild(replaceBtn);
-                modalSlotsList.appendChild(row);
-            });
-
-            lucide.createIcons();
-        }
-
-        /**
-         * Updates a specific slot (0-4) with a new image URL/ObjectURL and re-renders smoothly.
-         */
-        function applyImageToSlot(slotIndex, imageUrl, thumbUrl, newTitle, isLocalBlob = false) {
-            if (slotIndex < 0 || slotIndex >= 5) return;
-
-            // Revoke previous ObjectURL if replacing an existing local blob to prevent memory leaks
-            if (SLIDES_DATA[slotIndex].isLocalBlob && SLIDES_DATA[slotIndex].imageUrl.startsWith('blob:')) {
-                try {
-                    URL.revokeObjectURL(SLIDES_DATA[slotIndex].imageUrl);
-                } catch (_) {}
-            }
-
-            SLIDES_DATA[slotIndex] = {
-                ...SLIDES_DATA[slotIndex],
-                title: newTitle || SLIDES_DATA[slotIndex].title,
-                category: isLocalBlob ? "Personal Collection" : "Custom Image",
-                location: `Slide ${String(slotIndex + 1).padStart(2, '0')} of 05`,
-                description: isLocalBlob ? "Uploaded from your device — click title or caption to edit." : SLIDES_DATA[slotIndex].description,
-                imageUrl,
-                thumbUrl: thumbUrl || imageUrl,
-                isLocalBlob
-            };
-
-            persistSlidesToStorage();
-            renderSlides();
-            renderThumbnailsAndDots();
-            renderModalSlots();
-            updateUI(currentIndex, false);
-        }
-
-        /**
-         * Handles an array/FileList of 1 to 5 image files from input or drag-and-drop.
-         */
-        function handleMultipleImageFiles(fileList, startSlot = 0) {
-            const imageFiles = Array.from(fileList).filter(file => file.type.startsWith('image/'));
-            if (imageFiles.length === 0) {
-                showToast("Please select valid image files (JPG, PNG, WebP, etc.)");
-                return;
-            }
-
-            const filesToLoad = imageFiles.slice(0, 5 - startSlot);
-            filesToLoad.forEach((file, offset) => {
-                const targetSlot = startSlot + offset;
-                const objectUrl = URL.createObjectURL(file);
-                const autoTitle = formatFilenameToTitle(file.name);
-                applyImageToSlot(targetSlot, objectUrl, objectUrl, autoTitle, true);
-            });
-
-            // Jump to the first newly uploaded photo and reset progress timer
-            goToSlide(startSlot);
-            showToast(
-                filesToLoad.length === 1
-                    ? `Loaded "${formatFilenameToTitle(filesToLoad[0].name)}" into Slot 0${startSlot + 1}`
-                    : `Loaded ${filesToLoad.length} of your photos into the showcase!`
-            );
-        }
-
-        /**
-         * Opens the hidden single-file picker for a specific slot (0-4).
-         */
-        function triggerSingleSlotUpload(slotIndex) {
-            pendingSlotReplaceIndex = slotIndex;
-            singleSlotFileInput.value = '';
-            singleSlotFileInput.click();
-        }
-
-        /**
-         * Opens or closes the "Customize Your 5 Pictures" modal.
-         */
-        function openPhotosModal() {
-            renderModalSlots();
-            photosModal.classList.remove('hidden');
-            photosModal.classList.add('flex');
-        }
-
-        function closePhotosModal() {
-            photosModal.classList.add('hidden');
-            photosModal.classList.remove('flex');
-        }
-
-        /**
-         * Transitions to a specific slide index and updates captions, thumbnails, dots, and progress.
-         */
-        function goToSlide(newIndex) {
-            const total = SLIDES_DATA.length;
-            const normalizedIndex = ((newIndex % total) + total) % total;
-
-            if (normalizedIndex === currentIndex) {
-                resetProgress();
-                updateUI(currentIndex, false);
-                return;
-            }
-
-            currentIndex = normalizedIndex;
-            resetProgress();
-            updateUI(currentIndex, true);
-        }
-
-        function nextSlide() {
-            goToSlide(currentIndex + 1);
-        }
-
-        function prevSlide() {
-            goToSlide(currentIndex - 1);
-        }
-
-        /**
-         * Updates active classes on slides, captions, thumbnails, dots, and slide counter.
-         */
-        function updateUI(activeIndex, animateCaption = true) {
-            const slideData = SLIDES_DATA[activeIndex];
-
-            // 1. Update Counter
-            currentSlideNumEl.textContent = String(activeIndex + 1).padStart(2, '0');
-
-            // 2. Crossfade Slides & Restart subtle Ken Burns motion
-            const slideItems = document.querySelectorAll('.slide-item');
-            slideItems.forEach((item, idx) => {
-                const img = item.querySelector('img');
-                if (idx === activeIndex) {
-                    item.classList.remove('opacity-0', '-z-10', 'pointer-events-none');
-                    item.classList.add('opacity-100', 'z-0');
-                    img.classList.remove('animate-ken-burns');
-                    void img.offsetWidth;
-                    img.classList.add('animate-ken-burns');
-                } else {
-                    item.classList.remove('opacity-100', 'z-0');
-                    item.classList.add('opacity-0', '-z-10', 'pointer-events-none');
-                }
-            });
-
-            // 3. Update Caption with subtle fade-up transition
-            if (animateCaption) {
-                captionContainer.classList.add('opacity-0', 'translate-y-2');
-                setTimeout(() => {
-                    slideCategoryEl.textContent = slideData.category;
-                    slideLocationEl.textContent = slideData.location;
-                    slideTitleEl.textContent = slideData.title;
-                    slideDescriptionEl.textContent = slideData.description;
-                    captionContainer.classList.remove('opacity-0', 'translate-y-2');
-                }, 200);
-            } else {
-                slideCategoryEl.textContent = slideData.category;
-                slideLocationEl.textContent = slideData.location;
-                slideTitleEl.textContent = slideData.title;
-                slideDescriptionEl.textContent = slideData.description;
-            }
-
-            // 4. Update Thumbnails
-            const thumbBtns = document.querySelectorAll('.thumb-btn');
-            thumbBtns.forEach((btn, idx) => {
-                const overlay = btn.querySelector('.thumb-overlay');
-                if (idx === activeIndex) {
-                    btn.className = 'thumb-btn relative rounded-lg overflow-hidden w-14 h-9 sm:w-20 sm:h-12 flex-shrink-0 transition-all duration-300 cursor-pointer focus:outline-none ring-2 ring-white scale-105 opacity-100 shadow-lg shadow-black/50';
-                    if (overlay) overlay.classList.replace('opacity-100', 'opacity-0');
-                } else {
-                    btn.className = 'thumb-btn relative rounded-lg overflow-hidden w-14 h-9 sm:w-20 sm:h-12 flex-shrink-0 transition-all duration-300 cursor-pointer focus:outline-none ring-1 ring-white/20 opacity-55 hover:opacity-95 hover:scale-102';
-                    if (overlay) overlay.classList.replace('opacity-0', 'opacity-100');
-                }
-            });
-
-            // 5. Update Pagination Dots
-            const dotBtns = document.querySelectorAll('.dot-btn');
-            dotBtns.forEach((dot, idx) => {
-                if (idx === activeIndex) {
-                    dot.setAttribute('aria-selected', 'true');
-                    dot.className = 'dot-btn h-2 rounded-full transition-all duration-300 cursor-pointer focus:outline-none w-7 bg-white';
-                } else {
-                    dot.setAttribute('aria-selected', 'false');
-                    dot.className = 'dot-btn h-2 rounded-full transition-all duration-300 cursor-pointer focus:outline-none w-2 bg-white/35 hover:bg-white/70';
-                }
-            });
-        }
-
-        /**
-         * Toggles automatic playback on or off.
-         */
-        function togglePlayPause() {
-            isPlaying = !isPlaying;
-
-            if (isPlaying) {
-                lastFrameTime = performance.now();
-                playPauseBtn.setAttribute('aria-label', 'Pause slideshow');
-                playPauseIcon.innerHTML = '<i data-lucide="pause" class="w-3.5 h-3.5 text-white"></i>';
-                playPauseText.textContent = 'Playing';
-            } else {
-                playPauseBtn.setAttribute('aria-label', 'Play slideshow');
-                playPauseIcon.innerHTML = '<i data-lucide="play" class="w-3.5 h-3.5 text-white fill-white"></i>';
-                playPauseText.textContent = 'Paused';
-            }
-            lucide.createIcons();
-        }
-
-        /**
-         * Resets the progress bar timer to zero.
-         */
-        function resetProgress() {
-            elapsedBeforePause = 0;
-            lastFrameTime = performance.now();
-            progressBar.style.width = '0%';
-        }
-
-        /**
-         * Smooth 60fps requestAnimationFrame loop driving the progress bar and automatic slide advance.
-         */
-        function startAnimationLoop() {
-            lastFrameTime = performance.now();
-
-            function tick(now) {
-                if (isPlaying) {
-                    const delta = now - lastFrameTime;
-                    elapsedBeforePause += delta;
-
-                    const progressPercent = Math.min((elapsedBeforePause / SLIDE_DURATION_MS) * 100, 100);
-                    progressBar.style.width = `${progressPercent}%`;
-
-                    if (elapsedBeforePause >= SLIDE_DURATION_MS) {
-                        elapsedBeforePause = 0;
-                        nextSlide();
-                    }
-                }
-                lastFrameTime = now;
-                animationFrameId = requestAnimationFrame(tick);
-            }
-
-            animationFrameId = requestAnimationFrame(tick);
-        }
-
-        /**
-         * Registers button clicks, file inputs, drag-and-drop, inline editing, keyboard arrows, and touch swipes.
-         */
-        function setupEventListeners() {
-            // Arrow Buttons
-            prevBtn.addEventListener('click', prevSlide);
-            nextBtn.addEventListener('click', nextSlide);
-
-            // Play/Pause Button
-            playPauseBtn.addEventListener('click', togglePlayPause);
-
-            // Modal Open / Close Controls
-            openUploadModalBtn.addEventListener('click', openPhotosModal);
-            closeModalBtn.addEventListener('click', closePhotosModal);
-            doneModalBtn.addEventListener('click', closePhotosModal);
-            photosModal.addEventListener('click', (e) => {
-                if (e.target === photosModal) closePhotosModal();
-            });
-
-            // Quick Bulk Upload Button beside thumbnails & Modal Drop Zone Click
-            quickBulkUploadBtn.addEventListener('click', () => {
-                bulkFileInput.value = '';
-                bulkFileInput.click();
-            });
-            modalDropZone.addEventListener('click', () => {
-                bulkFileInput.value = '';
-                bulkFileInput.click();
-            });
-
-            // Bulk File Input Change (loads up to 5 files starting at slot 0)
-            bulkFileInput.addEventListener('change', (e) => {
-                if (e.target.files && e.target.files.length > 0) {
-                    handleMultipleImageFiles(e.target.files, 0);
-                }
-            });
-
-            // Single Slot File Input Change
-            singleSlotFileInput.addEventListener('change', (e) => {
-                if (e.target.files && e.target.files.length > 0 && pendingSlotReplaceIndex !== null) {
-                    handleMultipleImageFiles(e.target.files, pendingSlotReplaceIndex);
-                    pendingSlotReplaceIndex = null;
-                }
-            });
-
-            // Reset to Default 5 Photos
-            resetDefaultsBtn.addEventListener('click', () => {
-                SLIDES_DATA.forEach(s => {
-                    if (s.isLocalBlob && s.imageUrl.startsWith('blob:')) {
-                        try { URL.revokeObjectURL(s.imageUrl); } catch (_) {}
-                    }
-                });
-                SLIDES_DATA = DEFAULT_SLIDES_DATA.map(item => ({ ...item }));
-                localStorage.removeItem(STORAGE_KEY);
-                renderSlides();
-                renderThumbnailsAndDots();
-                renderModalSlots();
-                goToSlide(0);
-                showToast("Restored the 5 sample photographs");
-            });
-
-            // Inline Title & Caption Editing
-            slideTitleEl.addEventListener('blur', () => {
-                const updatedTitle = slideTitleEl.textContent.trim();
-                if (updatedTitle) {
-                    SLIDES_DATA[currentIndex].title = updatedTitle;
-                    persistSlidesToStorage();
-                    renderModalSlots();
-                } else {
-                    slideTitleEl.textContent = SLIDES_DATA[currentIndex].title;
-                }
-            });
-            slideTitleEl.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    slideTitleEl.blur();
-                }
-            });
-
-            slideDescriptionEl.addEventListener('blur', () => {
-                const updatedDesc = slideDescriptionEl.textContent.trim();
-                if (updatedDesc) {
-                    SLIDES_DATA[currentIndex].description = updatedDesc;
-                    persistSlidesToStorage();
-                } else {
-                    slideDescriptionEl.textContent = SLIDES_DATA[currentIndex].description;
-                }
-            });
-            slideDescriptionEl.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    slideDescriptionEl.blur();
-                }
-            });
-
-            // Global Drag & Drop Support anywhere on the page or modal
-            let dragDepth = 0;
-            window.addEventListener('dragenter', (e) => {
-                if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) {
-                    e.preventDefault();
-                    dragDepth++;
-                    if (photosModal.classList.contains('hidden')) {
-                        stageDropOverlay.classList.remove('hidden');
-                        stageDropOverlay.classList.add('flex');
-                    } else {
-                        modalDropZone.classList.add('border-white', 'bg-white/10');
-                    }
-                }
-            });
-
-            window.addEventListener('dragover', (e) => {
-                if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) {
-                    e.preventDefault();
-                }
-            });
-
-            window.addEventListener('dragleave', (e) => {
-                if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) {
-                    dragDepth = Math.max(0, dragDepth - 1);
-                    if (dragDepth === 0) {
-                        stageDropOverlay.classList.add('hidden');
-                        stageDropOverlay.classList.remove('flex');
-                        modalDropZone.classList.remove('border-white', 'bg-white/10');
-                    }
-                }
-            });
-
-            window.addEventListener('drop', (e) => {
-                if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                    e.preventDefault();
-                    dragDepth = 0;
-                    stageDropOverlay.classList.add('hidden');
-                    stageDropOverlay.classList.remove('flex');
-                    modalDropZone.classList.remove('border-white', 'bg-white/10');
-                    handleMultipleImageFiles(e.dataTransfer.files, 0);
-                }
-            });
-
-            // Keyboard Navigation (Left, Right, Spacebar, Escape)
-            document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape' && !photosModal.classList.contains('hidden')) {
-                    closePhotosModal();
-                    return;
-                }
-
-                const activeEl = document.activeElement;
-                if (['INPUT', 'TEXTAREA'].includes(activeEl.tagName) || activeEl.isContentEditable) return;
-
-                if (e.key === 'ArrowRight') {
-                    e.preventDefault();
-                    nextSlide();
-                } else if (e.key === 'ArrowLeft') {
-                    e.preventDefault();
-                    prevSlide();
-                } else if (e.code === 'Space' || e.key === ' ') {
-                    e.preventDefault();
-                    togglePlayPause();
-                }
-            });
-
-            // Mobile Touch Swipe Support
-            carouselStage.addEventListener('touchstart', (e) => {
-                touchStartX = e.changedTouches[0].screenX;
-            }, { passive: true });
-
-            carouselStage.addEventListener('touchend', (e) => {
-                touchEndX = e.changedTouches[0].screenX;
-                handleSwipeGesture();
-            }, { passive: true });
-        }
-
-        /**
-         * Evaluates horizontal swipe distance on touch devices.
-         */
-        function handleSwipeGesture() {
-            const swipeThreshold = 45;
-            const diff = touchStartX - touchEndX;
-            if (Math.abs(diff) > swipeThreshold) {
-                if (diff > 0) {
-                    nextSlide();
-                } else {
-                    prevSlide();
-                }
-            }
-        }
-
-        // Start application once DOM is ready
-        window.addEventListener('DOMContentLoaded', initGallery);
-    </script>
+<body>
+<div id="cross"></div>
+<div id="hud"></div>
+<div id="credit"></div>
+<div id="ratio">
+  <label for="rs">Map scale</label>
+  <input id="rs" type="range">
+  <div id="rv"></div>
+  <div class="hint">Keys: <kbd>[</kbd> zoom in, <kbd>]</kbd> zoom out</div>
+</div>
+<div id="overlay"><div id="card">
+  <h1>First-person template</h1>
+  <p>Click to capture the mouse.</p>
+  <p><kbd>W A S D</kbd> move &nbsp; <kbd>Shift</kbd> sprint</p>
+  <p><kbd>Space</kbd> jump &nbsp; <kbd>C</kbd> crouch &nbsp; <kbd>Esc</kbd> release</p>
+  <p>Map scale: use the slider (press Esc first) or <kbd>[</kbd> <kbd>]</kbd>.</p>
+  <p>Allow location access to texture the ground with the map around you (1 km radius).</p>
+</div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ================= CONFIG: tweak these ================= */
+const CFG = {
+  walkSpeed: 5, sprintSpeed: 8.5, crouchSpeed: 2.5,
+  groundAccel: 60,   // how fast you reach target speed on ground
+  airControl: 0.25,  // fraction of accel while airborne
+  jumpSpeed: 7.5, gravity: 22,
+  standHeight: 1.8, crouchHeight: 1.1, eyeOffset: 0.15, // eye = top of body - eyeOffset
+  radius: 0.35,
+  sensitivity: 0.0022, maxPitch: 89 * Math.PI / 180,
+  fov: 75, sprintFovBoost: 8,
+  bobAmount: 0.05, bobSpeed: 9,
+  mapZoom: 17,       // OSM tile zoom: higher = sharper source image but more requests (16 ≈ 36 tiles, 17 ≈ 100)
+  mapRadius: 1000,   // real-world metres of map loaded around you
+  mapUnitsPerMetre: 4, // MAP SCALE: real-world metres shown on each 1 m x 1 m floor square. 1 = true scale,
+                       // higher = smaller, sharper world (walkable radius = mapRadius / this)
+  ratioMin: 0.1, ratioMax: 100,  // slider range
+  defaultBuildingHeight: 9,      // metres, when OSM has no height or levels tag
+  levelHeight: 3.2               // metres per building:levels
+};
+
+/* ================= Scene ================= */
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x9fb7c9);
+scene.fog = new THREE.Fog(0x9fb7c9, 300, 1500);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 0.9));
+const sun = new THREE.DirectionalLight(0xffffff, 0.6); sun.position.set(10, 20, 5); scene.add(sun);
+
+const camera = new THREE.PerspectiveCamera(CFG.fov, 1, 0.05, 4000);
+camera.rotation.order = 'YXZ';   // yaw first, then pitch: no roll
+
+/* ================= World (replace with your level) ================= */
+const solids = [], testMeshes = [];               // collision boxes (THREE.Box3)
+function addBox(x, y, z, w, h, d, color) { // x,z = center; y = bottom
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color }));
+  m.position.set(x, y + h / 2, z); scene.add(m); testMeshes.push(m);
+  solids.push(new THREE.Box3().setFromObject(m));
+}
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(20000, 20000), new THREE.MeshLambertMaterial({ color: 0x6f8f6a }));
+floor.rotation.x = -Math.PI / 2; scene.add(floor);
+const grid = new THREE.GridHelper(200, 100, 0x000000, 0x000000); grid.position.y = 0.01;
+grid.material.opacity = 0.12; grid.material.transparent = true; scene.add(grid);
+addBox(0, 0, -8, 6, 1, 3, 0xc98f5a);       // low step
+addBox(0, 0, -12, 4, 2.2, 3, 0xb9744a);    // high step
+addBox(8, 0, -4, 2, 4, 10, 0x8a8fa8);      // wall
+addBox(-8, 0, -6, 3, 0.5, 3, 0xd9c36a);
+addBox(-8, 0, -10, 3, 1.5, 3, 0xd9a05a);
+addBox(-8, 0, -14, 3, 2.5, 3, 0xd97a5a);   // staircase of jumps
+
+/* ================= Player state ================= */
+const player = {
+  pos: new THREE.Vector3(0, 0, 6),   // feet position
+  vel: new THREE.Vector3(),
+  yaw: 0, pitch: 0,
+  height: CFG.standHeight,
+  grounded: false, bob: 0, fov: CFG.fov
+};
+
+/* ================= Input ================= */
+const keys = {};
+addEventListener('keydown', e => { keys[e.code] = true; if (e.code === 'Space') e.preventDefault(); });
+addEventListener('keyup',   e => { keys[e.code] = false; });
+addEventListener('blur',    () => { for (const k in keys) keys[k] = false; });
+
+const overlay = document.getElementById('overlay');
+let locked = false, dragLook = false;
+function look(dx, dy) {
+  player.yaw   -= dx * CFG.sensitivity;
+  player.pitch  = Math.max(-CFG.maxPitch, Math.min(CFG.maxPitch, player.pitch - dy * CFG.sensitivity));
+}
+overlay.addEventListener('click', () => {
+  overlay.style.display = 'none';
+  startLocation();
+  try { renderer.domElement.requestPointerLock(); } catch (e) {}
+  setTimeout(() => { if (!locked) dragLook = true; }, 300); // fallback if pointer lock is blocked
+});
+document.addEventListener('pointerlockchange', () => {
+  locked = document.pointerLockElement === renderer.domElement;
+  if (locked) dragLook = false; else if (!dragLook) overlay.style.display = 'flex';
+});
+addEventListener('mousemove', e => {
+  if (locked) look(e.movementX, e.movementY);
+  else if (dragLook && e.buttons && !e.target.closest('#ratio')) look(e.movementX, e.movementY);
+});
+addEventListener('keydown', e => { if (e.code === 'Escape' && dragLook) { dragLook = false; overlay.style.display = 'flex'; } });
+
+/* ================= Movement + collision ================= */
+function overlaps(b) {
+  const p = player.pos, r = CFG.radius;
+  return p.x + r > b.min.x && p.x - r < b.max.x &&
+         p.y + player.height > b.min.y && p.y < b.max.y &&
+         p.z + r > b.min.z && p.z - r < b.max.z;
+}
+// Move one axis at a time, then push out of anything we hit.
+function moveAxis(axis, amount) {
+  player.pos[axis] += amount;
+  for (const b of solids) {
+    if (!overlaps(b)) continue;
+    if (axis === 'y') {
+      if (amount <= 0) { player.pos.y = b.max.y; player.grounded = true; }
+      else player.pos.y = b.min.y - player.height;
+      player.vel.y = 0;
+    } else {
+      player.pos[axis] = amount > 0 ? b.min[axis] - CFG.radius : b.max[axis] + CFG.radius;
+      player.vel[axis] = 0;
+    }
+  }
+  collideBuildings(axis, amount);
+}
+
+function updatePlayer(dt) {
+  // crouch (blocked from standing up under a ceiling)
+  const wantCrouch = keys.KeyC || keys.ControlLeft;
+  const targetH = wantCrouch ? CFG.crouchHeight : CFG.standHeight;
+  if (targetH > player.height) {
+    const prev = player.height; player.height = targetH;
+    if (solids.some(overlaps)) player.height = prev;
+  } else player.height = targetH;
+  const crouching = player.height < CFG.standHeight - 0.01;
+
+  // wish direction relative to where we're looking
+  const fwd = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
+  const strafe = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
+  const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
+  let wx = strafe * cos - fwd * sin, wz = -strafe * sin - fwd * cos;
+  const len = Math.hypot(wx, wz); if (len > 0) { wx /= len; wz /= len; }
+
+  const sprinting = keys.ShiftLeft && fwd > 0 && !crouching;
+  const speed = crouching ? CFG.crouchSpeed : sprinting ? CFG.sprintSpeed : CFG.walkSpeed;
+  const accel = CFG.groundAccel * (player.grounded ? 1 : CFG.airControl) * dt;
+  const approach = (v, t) => v + Math.max(-accel, Math.min(accel, t - v));
+  player.vel.x = approach(player.vel.x, wx * speed);
+  player.vel.z = approach(player.vel.z, wz * speed);
+
+  // jump + gravity
+  if (keys.Space && player.grounded) player.vel.y = CFG.jumpSpeed;
+  player.vel.y -= CFG.gravity * dt;
+
+  // integrate with collision
+  player.grounded = false;
+  moveAxis('x', player.vel.x * dt);
+  moveAxis('z', player.vel.z * dt);
+  moveAxis('y', player.vel.y * dt);
+  const dist = Math.hypot(player.pos.x, player.pos.z);   // stay inside the mapped circle
+  const lim = CFG.mapRadius / mapRatio;
+  if (dist > lim) { player.pos.x *= lim / dist; player.pos.z *= lim / dist; }
+  if (player.pos.y <= 0) { player.pos.y = 0; player.vel.y = 0; player.grounded = true; }
+
+  // view effects: head bob + sprint FOV
+  const hSpeed = Math.hypot(player.vel.x, player.vel.z);
+  if (player.grounded) player.bob += hSpeed * dt * CFG.bobSpeed / CFG.walkSpeed;
+  const bobY = player.grounded ? Math.sin(player.bob) * CFG.bobAmount * Math.min(hSpeed / CFG.walkSpeed, 1) : 0;
+  const targetFov = CFG.fov + (sprinting && hSpeed > 1 ? CFG.sprintFovBoost : 0);
+  player.fov += (targetFov - player.fov) * Math.min(1, dt * 8);
+  if (Math.abs(camera.fov - player.fov) > 0.01) { camera.fov = player.fov; camera.updateProjectionMatrix(); }
+
+  // camera follows eye position
+  camera.position.set(player.pos.x, player.pos.y + player.height - CFG.eyeOffset + bobY, player.pos.z);
+  camera.rotation.set(player.pitch, player.yaw, 0);
+
+  document.getElementById('hud').textContent =
+    `speed ${hSpeed.toFixed(1)} m/s · ${player.grounded ? 'grounded' : 'airborne'}${crouching ? ' · crouching' : ''}${buildingStatus}`;
+}
+
+/* ================= Map ground (OpenStreetMap tiles) =================
+   World axes: +x = east, -z = north, 1 unit = 1 metre. The player's real location is (0, 0).
+   Test without GPS: add ?lat=43.6426&lon=-79.3871 to the URL. */
+/* Map scale: mapGroup is scaled about the origin (your real position), so changing the ratio
+   never moves you relative to the map. Floor metre = mapRatio real metres. */
+const mapGroup = new THREE.Group(); scene.add(mapGroup);          // ground texture (x/z scaled only)
+const bGroup = new THREE.Group(); scene.add(bGroup);              // buildings (scaled uniformly, so heights shrink too)
+let mapRatio = CFG.mapUnitsPerMetre;
+const rs = document.getElementById('rs'), rv = document.getElementById('rv');
+rs.min = Math.log10(CFG.ratioMin); rs.max = Math.log10(CFG.ratioMax); rs.step = 0.01;   // log slider
+function setRatio(r) {
+  mapRatio = Math.min(CFG.ratioMax, Math.max(CFG.ratioMin, r));
+  rs.value = Math.log10(mapRatio);
+  mapGroup.scale.set(1 / mapRatio, 1, 1 / mapRatio);           // keep height at 1 to avoid z-fighting
+  bGroup.scale.setScalar(1 / mapRatio);
+  const f = mapRatio >= 10 ? mapRatio.toFixed(0) : mapRatio.toFixed(1);
+  rv.textContent = `1 m × 1 m of floor = ${f} m × ${f} m of map (reach ${Math.round(CFG.mapRadius / mapRatio)} m)`;
+}
+rs.addEventListener('input', () => setRatio(10 ** rs.value));
+rs.addEventListener('change', () => rs.blur());                 // so Space/arrows go back to the game
+addEventListener('keydown', e => {
+  if (e.code === 'BracketLeft') setRatio(mapRatio / 1.1);
+  if (e.code === 'BracketRight') setRatio(mapRatio * 1.1);
+});
+setRatio(CFG.mapUnitsPerMetre);
+
+/* ================= Buildings (OSM footprints -> oriented boxes) =================
+   Each building becomes the smallest rotated rectangle around its footprint, extruded to its
+   real height (height tag, else building:levels, else CFG.defaultBuildingHeight).
+   Data stored in REAL metres; collision and rendering scale by 1 / mapRatio. */
+const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+const buildings = [];
+let buildingStatus = '';
+
+function minRect(pts) {                       // pts: [[x, z], ...] -> {x, z, hx, hz, c, s, ang}
+  const P = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], up = [];
+  for (const p of P) { while (lo.length > 1 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+  for (let i = P.length - 1; i >= 0; i--) { const p = P[i]; while (up.length > 1 && cr(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+  const H = lo.slice(0, -1).concat(up.slice(0, -1));          // convex hull
+  if (H.length < 3) return null;
+  let best = null;
+  for (let i = 0; i < H.length; i++) {                        // try each hull edge as the box's axis
+    const a = H[i], b = H[(i + 1) % H.length], ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    const c = Math.cos(ang), s = Math.sin(ang);
+    let u0 = 1e9, u1 = -1e9, v0 = 1e9, v1 = -1e9;
+    for (const p of H) {
+      const u = p[0] * c + p[1] * s, v = -p[0] * s + p[1] * c;
+      u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v);
+    }
+    const area = (u1 - u0) * (v1 - v0);
+    if (!best || area < best.area) best = { area, ang, c, s, u0, u1, v0, v1 };
+  }
+  const mu = (best.u0 + best.u1) / 2, mv = (best.v0 + best.v1) / 2;
+  return { x: mu * best.c - mv * best.s, z: mu * best.s + mv * best.c,
+           hx: (best.u1 - best.u0) / 2, hz: (best.v1 - best.v0) / 2, c: best.c, s: best.s, ang: best.ang };
+}
+
+function heightOf(t) {
+  const h = parseFloat(t.height); if (h > 0) return h;
+  const l = parseFloat(t['building:levels']); if (l > 0) return l * CFG.levelHeight;
+  return CFG.defaultBuildingHeight;
+}
+
+async function loadBuildings(lat, lon) {
+  buildingStatus = ' · loading buildings…';
+  try {
+    const q = `[out:json][timeout:30];way["building"](around:${CFG.mapRadius},${lat},${lon});out tags geom;`;
+    const res = await fetch(OVERPASS_URL, { method: 'POST', body: 'data=' + encodeURIComponent(q),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const kx = 111320 * Math.cos(lat * Math.PI / 180), kz = 111132;   // metres per degree
+    const list = [];
+    for (const w of data.elements) {
+      if (!w.geometry || w.geometry.length < 4) continue;
+      const r = minRect(w.geometry.map(g => [(g.lon - lon) * kx, -(g.lat - lat) * kz]));  // -z = north
+      if (!r || Math.hypot(r.x, r.z) > CFG.mapRadius) continue;
+      r.hx = Math.max(r.hx, 0.75); r.hz = Math.max(r.hz, 0.75);
+      r.h = heightOf(w.tags || {}); r.r = Math.hypot(r.hx, r.hz);
+      list.push(r);
+    }
+    if (!list.length) { buildingStatus = ' · no buildings found'; return; }
+
+    const geo = new THREE.BoxGeometry(1, 1, 1); geo.translate(0, 0.5, 0);   // unit cube sitting on y = 0
+    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), list.length);
+    mesh.frustumCulled = false;
+    const d = new THREE.Object3D(), col = new THREE.Color();
+    list.forEach((b, i) => {
+      d.position.set(b.x, 0, b.z); d.rotation.set(0, -b.ang, 0); d.scale.set(b.hx * 2, b.h, b.hz * 2);
+      d.updateMatrix(); mesh.setMatrixAt(i, d.matrix);
+      col.setHSL(0.09, 0.12, 0.74 - Math.min(b.h, 60) / 60 * 0.3 + ((i * 37) % 11) / 200);  // taller = darker
+      mesh.setColorAt(i, col);
+    });
+    bGroup.add(mesh);
+    buildings.push(...list);
+    testMeshes.forEach(m => scene.remove(m)); testMeshes.length = 0; solids.length = 0;   // drop the demo blocks
+    buildingStatus = ` · ${list.length} buildings`;
+  } catch (e) { buildingStatus = ' · buildings failed (' + e.message + ')'; }
+}
+
+// Circle (player) vs rotated box. Walk into the sides; land on and walk across the roof.
+function collideBuildings(axis, amount) {
+  const k = 1 / mapRatio, p = player.pos, rad = CFG.radius;
+  for (const b of buildings) {
+    const bx = b.x * k, bz = b.z * k, top = b.h * k, R = b.r * k + rad;
+    if (Math.abs(p.x - bx) > R || Math.abs(p.z - bz) > R || p.y >= top) continue;
+    const dx = p.x - bx, dz = p.z - bz, hx = b.hx * k, hz = b.hz * k;
+    const lx = dx * b.c + dz * b.s, lz = -dx * b.s + dz * b.c;           // player in box space
+    const ex = lx - Math.max(-hx, Math.min(hx, lx)), ez = lz - Math.max(-hz, Math.min(hz, lz));
+    const d2 = ex * ex + ez * ez;
+    if (d2 >= rad * rad) continue;
+    if (axis === 'y') { if (amount <= 0) { p.y = top; player.vel.y = 0; player.grounded = true; } continue; }
+    let px, pz;                                                           // push-out in box space
+    if (d2 > 1e-9) { const dd = Math.sqrt(d2); px = ex / dd * (rad - dd); pz = ez / dd * (rad - dd); }
+    else if (hx - Math.abs(lx) < hz - Math.abs(lz)) { px = Math.sign(lx || 1) * (hx - Math.abs(lx) + rad); pz = 0; }
+    else { px = 0; pz = Math.sign(lz || 1) * (hz - Math.abs(lz) + rad); }
+    const wx = px * b.c - pz * b.s, wz = px * b.s + pz * b.c, m = Math.hypot(wx, wz) || 1;
+    p.x += wx; p.z += wz;
+    const vn = (player.vel.x * wx + player.vel.z * wz) / m;               // cancel velocity into the wall
+    if (vn < 0) { player.vel.x -= wx / m * vn; player.vel.z -= wz / m * vn; }
+  }
+}
+
+const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const credit = document.getElementById('credit');
+let locStarted = false;
+
+function startLocation() {
+  if (locStarted) return; locStarted = true;
+  const q = new URLSearchParams(location.search);
+  if (q.has('lat') && q.has('lon')) return loadMap(+q.get('lat'), +q.get('lon'));
+  if (!navigator.geolocation) { credit.textContent = 'Location not supported: using flat ground'; return; }
+  credit.textContent = 'Getting location…';
+  navigator.geolocation.getCurrentPosition(
+    p => loadMap(p.coords.latitude, p.coords.longitude),
+    e => { credit.textContent = 'Location unavailable (' + e.message + '): using flat ground'; },
+    { enableHighAccuracy: true, timeout: 15000 });
+}
+
+const loadImage = url => new Promise(res => {
+  const img = new Image(); img.crossOrigin = 'anonymous';
+  img.onload = () => res(img); img.onerror = () => res(null); img.src = url;
+});
+
+async function loadMap(lat, lon) {
+  loadBuildings(lat, lon);                                       // runs in parallel with the tiles
+  const rad = lat * Math.PI / 180, maxTex = Math.min(renderer.capabilities.maxTextureSize, 8192);
+  let z = CFG.mapZoom, n, mpp, cx, cy, x0, x1, y0, y1, cols, rows;
+  for (;; z--) {                                                 // lower the zoom until the mosaic fits in one texture
+    n = 2 ** z;
+    mpp = 156543.03392 * Math.cos(rad) / n;                      // real metres per source pixel
+    cx = (lon + 180) / 360 * n;                                  // fractional tile coords of the player
+    cy = (1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * n;
+    const rt = CFG.mapRadius / (mpp * 256);                      // radius in tiles
+    x0 = Math.floor(cx - rt); x1 = Math.floor(cx + rt);
+    y0 = Math.max(0, Math.floor(cy - rt)); y1 = Math.min(n - 1, Math.floor(cy + rt));
+    cols = x1 - x0 + 1; rows = y1 - y0 + 1;
+    if (Math.max(cols, rows) * 256 <= maxTex || z <= 12) break;
+  }
+  credit.textContent = `Loading ${cols * rows} map tiles…`;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = cols * 256; canvas.height = rows * 256;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#d8d4c8'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const jobs = [];
+  for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
+    const url = TILE_URL.replace('{z}', z).replace('{x}', ((tx % n) + n) % n).replace('{y}', ty);
+    jobs.push(loadImage(url).then(img => { if (img) ctx.drawImage(img, (tx - x0) * 256, (ty - y0) * 256); return !!img; }));
+  }
+  const ok = (await Promise.all(jobs)).filter(Boolean).length;
+  if (!ok) { credit.textContent = 'Map tiles blocked or offline: using flat ground'; return; }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const w = canvas.width * mpp, h = canvas.height * mpp;
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex }));
+  ground.rotation.x = -Math.PI / 2;                              // texture top = north = -z
+  ground.position.set(((cx - x0) * 256 * -1 + canvas.width / 2) * mpp, 0.02, ((cy - y0) * 256 * -1 + canvas.height / 2) * mpp);
+  mapGroup.add(ground);
+  grid.visible = false;
+  credit.innerHTML = `${lat.toFixed(4)}, ${lon.toFixed(4)} · © <a style="color:inherit" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors`;
+  credit.style.pointerEvents = 'auto';
+}
+
+/* ================= Loop ================= */
+function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize); resize();
+
+let last = performance.now();
+(function frame(now) {
+  requestAnimationFrame(frame);
+  let dt = Math.min((now - last) / 1000, 0.1); last = now;
+  const steps = Math.ceil(dt / 0.016);          // substeps keep collisions stable on slow frames
+  for (let i = 0; i < steps; i++) updatePlayer(dt / steps);
+  renderer.render(scene, camera);
+})(last);
+</script>
 </body>
 </html>
