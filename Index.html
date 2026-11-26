@@ -78,7 +78,7 @@ const CFG = {
   ratioMin: 0.1, ratioMax: 100,  // slider range
   defaultBuildingHeight: 9,      // metres, when OSM has no height or levels tag
   levelHeight: 3.2,              // metres per building:levels
-  buildingRings: [250, 600],     // buildings load in rings (metres) so the nearest ones appear first
+  buildingCell: 500,             // buildings load in square cells (metres), nearest first, 2 requests at a time
   texelTarget: 0.06,             // sharp ground: target world metres per map pixel near you (drives detail tile zoom)
   detailTiles: 3,                // detail tiles loaded this many tiles out from you (3 = 7x7 grid)
   touchLook: 1.6                 // look speed multiplier on touch screens
@@ -280,7 +280,7 @@ function updatePlayer(dt) {
   camera.rotation.set(player.pitch, player.yaw, 0);
 
   document.getElementById('hud').textContent =
-    `speed ${hSpeed.toFixed(1)} m/s · ${player.grounded ? 'grounded' : 'airborne'}${crouching ? ' · crouching' : ''}${buildingStatus}`;
+    `speed ${hSpeed.toFixed(1)} m/s · ${player.grounded ? 'grounded' : 'airborne'}${crouching ? ' · crouching' : ''}${buildingStatus}${detailStatus}`;
 }
 
 /* ================= Map ground (OpenStreetMap tiles) =================
@@ -354,7 +354,7 @@ async function overpass(query) {                 // tries each mirror in turn
   let err;
   for (const url of OVERPASS) {
     try {
-      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 25000);
+      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 60000);
       const res = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(query), signal: ctl.signal,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
       clearTimeout(t);
@@ -382,39 +382,53 @@ function renderBuildings(list) {                // list of [x, z, hx, hz, ang, h
   testMeshes.forEach(m => scene.remove(m)); testMeshes.length = 0; solids.length = 0;   // drop the demo blocks
 }
 
-/* Loads buildings in rings (nearest first). Results are cached in localStorage per ~100 m cell,
-   so the next visit is instant. Coordinates are stored relative to the snapped cell centre. */
+/* Loads buildings in square cells (nearest first, 2 requests at a time). Small bounding-box queries are
+   much faster and more reliable on Overpass than one big radius query. Results are cached in localStorage
+   per ~100 m cell, so the next visit is instant. Stored coordinates are relative to the snapped cell centre. */
 async function loadBuildings(lat, lon) {
   buildingStatus = ' · loading buildings…';
   const sLat = Math.round(lat * 1000) / 1000, sLon = Math.round(lon * 1000) / 1000;
   const kx = 111320 * Math.cos(sLat * Math.PI / 180), kz = 111132;
   const ox = (sLon - lon) * kx, oz = -(sLat - lat) * kz;           // cell centre relative to you
-  const R = CFG.mapRadius + 100, key = `bld1:${sLat}:${sLon}:${R}`;
+  const R = CFG.mapRadius + 100, key = `bld2:${sLat}:${sLon}:${R}`;
   const shift = l => l.map(a => [a[0] + ox, a[1] + oz, a[2], a[3], a[4], a[5]])
                       .filter(a => Math.hypot(a[0], a[1]) <= CFG.mapRadius);
   try {
     const hit = JSON.parse(localStorage.getItem(key) || 'null');
     if (hit) { renderBuildings(shift(hit)); buildingStatus = ` · ${buildings.length} buildings (cached)`; return; }
   } catch (e) {}
-  const edges = [0, ...CFG.buildingRings.filter(r => r < R), R], all = [];
-  try {
-    for (let i = 1; i < edges.length; i++) {
-      const [r0, r1] = [edges[i - 1], edges[i]];
-      const around = r => `way["building"](around:${r},${sLat},${sLon})`;
-      const q = `[out:json][timeout:25];${r0 ? `(${around(r1)};-${around(r0)};)` : around(r1)};out tags geom;`;
-      const part = [];
-      for (const w of await overpass(q)) {
-        if (!w.geometry || w.geometry.length < 4) continue;
-        const r = minRect(w.geometry.map(g => [(g.lon - sLon) * kx, -(g.lat - sLat) * kz]));   // -z = north
-        if (r) part.push([r.x, r.z, Math.max(r.hx, 0.75), Math.max(r.hz, 0.75), r.ang, heightOf(w.tags || {})]);
-      }
-      all.push(...part);
-      renderBuildings(shift(part));
-      buildingStatus = ` · ${buildings.length} buildings (loading…)`;
+
+  const C = CFG.buildingCell, n = Math.ceil(R / C), cells = [];
+  for (let i = -n; i < n; i++) for (let j = -n; j < n; j++) {
+    const dx = i * C > 0 ? i * C : (i + 1) * C < 0 ? -(i + 1) * C : 0;      // nearest point of the cell to you
+    const dz = j * C > 0 ? j * C : (j + 1) * C < 0 ? -(j + 1) * C : 0;
+    const d = Math.hypot(dx, dz); if (d > R) continue;
+    cells.push({ d, w: sLon + i * C / kx, e: sLon + (i + 1) * C / kx, n: sLat - j * C / kz, s: sLat - (j + 1) * C / kz });
+  }
+  cells.sort((a, b) => a.d - b.d);
+
+  const seen = new Set(), all = []; let next = 0, done = 0, failed = 0;
+  const worker = async () => {
+    while (next < cells.length) {
+      const c = cells[next++];
+      const q = `[out:json][timeout:50];way["building"](${c.s},${c.w},${c.n},${c.e});out tags geom;`;
+      try {
+        let els; try { els = await overpass(q); } catch (e) { els = await overpass(q); }   // one retry
+        const part = [];
+        for (const w of els) {
+          if (seen.has(w.id) || !w.geometry || w.geometry.length < 4) continue;
+          seen.add(w.id);                                                 // buildings on a cell border arrive twice
+          const r = minRect(w.geometry.map(g => [(g.lon - sLon) * kx, -(g.lat - sLat) * kz]));   // -z = north
+          if (r) part.push([r.x, r.z, Math.max(r.hx, 0.75), Math.max(r.hz, 0.75), r.ang, heightOf(w.tags || {})]);
+        }
+        all.push(...part); renderBuildings(shift(part));
+      } catch (e) { failed++; }
+      buildingStatus = ` · ${buildings.length} buildings (${++done}/${cells.length} areas${failed ? `, ${failed} failed` : ''})`;
     }
-    try { localStorage.setItem(key, JSON.stringify(all.map(a => a.map(v => +v.toFixed(3))))); } catch (e) {}
-    buildingStatus = ` · ${buildings.length} buildings`;
-  } catch (e) { buildingStatus = ' · buildings failed (' + e.message + ')'; }
+  };
+  await Promise.all([worker(), worker()]);
+  if (!failed) try { localStorage.setItem(key, JSON.stringify(all.map(a => a.map(v => +v.toFixed(3))))); } catch (e) {}
+  buildingStatus = ` · ${buildings.length} buildings${failed ? ` (${failed} of ${cells.length} areas failed)` : ''}`;
 }
 
 // Circle (player) vs rotated box. Walk into the sides; land on and walk across the roof.
@@ -445,7 +459,7 @@ function collideBuildings(axis, amount) {
    higher-zoom OSM tiles, with the zoom picked from the map scale so map pixels stay ~CFG.texelTarget
    world metres. Tiles live in mapGroup (real metres), so the slider scales them with everything else. */
 const detail = new Map();                       // "z/x/y" -> { z, x, y, state, mesh }
-let mapOrigin = null, baseZoom = 99, detailT = 0;
+let mapOrigin = null, baseZoom = 99, detailT = 0, detailStatus = '';
 const maxAniso = renderer.capabilities.getMaxAnisotropy();
 
 function disposeTile(e) {
@@ -488,6 +502,9 @@ function updateDetail() {
     const far = Math.abs(e.x + 0.5 - px) > rt + 1.5 || Math.abs(e.y + 0.5 - py) > rt + 1.5;
     if (e.z === zd ? far : ready) { disposeTile(e); detail.delete(k); }   // old zoom goes once the new one is in
   }
+  let nReady = 0, nFail = 0;
+  for (const k of want) { const st = detail.get(k).state; if (st === 'ready') nReady++; else if (st === 'failed') nFail++; }
+  detailStatus = zd > baseZoom ? ` · ground z${zd} ${nReady}/${want.size}${nFail ? ` (${nFail} failed)` : ''}` : ` · ground z${baseZoom}`;
 }
 
 const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
