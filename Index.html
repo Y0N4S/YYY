@@ -573,37 +573,68 @@ async function loadBuildings(lat, lon) {
                       .filter(a => Math.hypot(a[0], a[1]) <= CFG.mapRadius);
   try { Object.keys(localStorage).filter(k => k.startsWith('bld1:')).forEach(k => localStorage.removeItem(k)); } catch (e) {}  // old cache format
   const edges = [0, ...CFG.buildingRings.filter(r => r < R), R];
-  try {
-    for (let i = 1; i < edges.length; i++) {
-      const [r0, r1] = [edges[i - 1], edges[i]], key = `bld2:${sLat}:${sLon}:${r0}:${r1}`;
+  const around = (r, bb) => `way["building"](around:${r},${sLat},${sLon})${bb}`;
+  const toBox = w => {                                             // OSM way -> [x, z, hx, hz, ang, h] (real metres)
+    if (w.geometry) {
+      if (w.geometry.length < 4) return null;
+      const r = minRect(w.geometry.map(g => [(g.lon - sLon) * kx, -(g.lat - sLat) * kz]));   // -z = north
+      return r && [r.x, r.z, Math.max(r.hx, 0.75), Math.max(r.hz, 0.75), r.ang, heightOf(w.tags || {})];
+    }
+    if (!w.bounds) return null;
+    const b = w.bounds, x0 = (b.minlon - sLon) * kx, x1 = (b.maxlon - sLon) * kx;
+    const z0 = -(b.maxlat - sLat) * kz, z1 = -(b.minlat - sLat) * kz;
+    return [(x0 + x1) / 2, (z0 + z1) / 2, Math.max((x1 - x0) / 2, 0.75), Math.max((z1 - z0) / 2, 0.75), 0, heightOf(w.tags || {})];
+  };
+  let failed = 0;
+  for (let i = 1; i < edges.length; i++) {
+    const [r0, r1] = [edges[i - 1], edges[i]], km = (r1 / 1000).toFixed(1);
+    const mode = r1 <= CFG.outlineRadius ? 'out tags geom;' : r1 <= CFG.heightTagRadius ? 'out tags bb;' : 'out ids bb qt;';
+    // Big rings are fetched as 4 quarters (NE, NW, SW, SE): smaller queries that busy servers are less likely
+    // to drop, and each quarter is cached on its own. A building belongs to the quarter holding its centre.
+    const dLat = r1 / kz, dLon = r1 / kx;
+    const pieces = r1 > CFG.outlineRadius
+      ? [[1, 1], [1, -1], [-1, -1], [-1, 1]].map(([ns, ew], q) => ({ q, ns, ew,
+          bb: `(${ns > 0 ? sLat : sLat - dLat},${ew > 0 ? sLon : sLon - dLon},${ns > 0 ? sLat + dLat : sLat},${ew > 0 ? sLon + dLon : sLon})` }))
+      : [{ q: null, bb: '' }];
+    for (const pc of pieces) {
+      const key = `bld2:${sLat}:${sLon}:${r0}:${r1}` + (pc.q === null ? '' : ':q' + pc.q);
       let part = null;
       try { part = JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) {}
       if (!part) {
-        const around = r => `way["building"](around:${r},${sLat},${sLon})`;
-        const mode = r1 <= CFG.outlineRadius ? 'out tags geom;' : r1 <= CFG.heightTagRadius ? 'out tags bb;' : 'out ids bb qt;';
-        const q = `[out:json][timeout:120];${r0 ? `(${around(r1)};-${around(r0)};)` : around(r1)};${mode}`;
-        buildingStatus = ` · ${buildings.length} buildings (loading out to ${(r1 / 1000).toFixed(1)} km…)`;
-        part = [];
-        for (const w of await overpass(q, r1 > CFG.outlineRadius ? 20000 : OVERPASS_HEDGE_MS)) {   // big rings: hedge later
-          if (w.geometry) {
-            if (w.geometry.length < 4) continue;
-            const r = minRect(w.geometry.map(g => [(g.lon - sLon) * kx, -(g.lat - sLat) * kz]));   // -z = north
-            if (r) part.push([r.x, r.z, Math.max(r.hx, 0.75), Math.max(r.hz, 0.75), r.ang, heightOf(w.tags || {})]);
-          } else if (w.bounds) {
-            const b = w.bounds, x0 = (b.minlon - sLon) * kx, x1 = (b.maxlon - sLon) * kx;
-            const z0 = -(b.maxlat - sLat) * kz, z1 = -(b.minlat - sLat) * kz;
-            part.push([(x0 + x1) / 2, (z0 + z1) / 2, Math.max((x1 - x0) / 2, 0.75), Math.max((z1 - z0) / 2, 0.75), 0, heightOf(w.tags || {})]);
+        const q = `[out:json][timeout:120];${r0 ? `(${around(r1, pc.bb)};-${around(r0, pc.bb)};)` : around(r1, pc.bb)};${mode}`;
+        const label = `out to ${km} km` + (pc.q === null ? '' : ` (part ${pc.q + 1}/4)`);
+        try {
+          part = [];
+          for (const w of await overpassRetry(q, r1 > CFG.outlineRadius ? 20000 : OVERPASS_HEDGE_MS, label)) {
+            const a = toBox(w);
+            if (!a) continue;
+            if (pc.q !== null && ((a[1] <= 0) !== (pc.ns > 0) || (a[0] >= 0) !== (pc.ew > 0))) continue;   // centre in another quarter
+            part.push(a);
           }
+          try { localStorage.setItem(key, JSON.stringify(part.map(a => a.map((v, j) => +v.toFixed(j === 4 ? 3 : 1))))); } catch (e) {}  // full storage: skip caching
+        } catch (e) {                                // give up on this piece, keep loading the rest
+          console.warn('Buildings ' + label + ':', e);
+          failed++; part = [];
         }
-        try { localStorage.setItem(key, JSON.stringify(part.map(a => a.map((v, j) => +v.toFixed(j === 4 ? 3 : 1))))); } catch (e) {}  // full storage: just skip caching
       }
       renderBuildings(shift(part));
     }
-    buildingStatus = ` · ${buildings.length} buildings`;
-  } catch (e) {                                   // keep the rings that did load
-    console.warn('Buildings:', e);
-    buildingStatus = buildings.length ? ` · ${buildings.length} buildings (outer area failed to load)`
-                                      : ' · buildings failed to load (map servers busy, reload to retry)';
+  }
+  buildingStatus = !failed ? ` · ${buildings.length} buildings`
+    : buildings.length ? ` · ${buildings.length} buildings (${failed} area${failed > 1 ? 's' : ''} failed: map servers busy, reload later to fill in)`
+    : ' · buildings failed to load (map servers busy, reload later to retry)';
+}
+
+/* Overpass with patience: up to 3 rounds through all mirrors, waiting 15 s then 30 s between rounds. */
+async function overpassRetry(q, hedgeMs, label) {
+  for (let attempt = 1; ; attempt++) {
+    buildingStatus = ` · ${buildings.length} buildings (loading ${label}${attempt > 1 ? `, try ${attempt}/3` : ''}…)`;
+    try { return await overpass(q, hedgeMs); }
+    catch (e) {
+      if (attempt >= 3) throw e;
+      buildingStatus = ` · ${buildings.length} buildings (map servers busy, retrying ${label} soon…)`;
+      await new Promise(r => setTimeout(r, attempt * 15000));
+    }
   }
 }
 
