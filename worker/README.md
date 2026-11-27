@@ -38,6 +38,7 @@ browser (GitHub Pages)  --POST {messages, context}-->  Worker (holds the key)  -
 
 - The origin check stops other websites from using your Worker in a browser. It does **not** stop someone who calls the Worker URL directly with a script. The per-IP rate limit and `MAX_TOKENS` cap how much that can cost. To control spend, also set a monthly spend limit for the key on the Claude Console.
 - The rate limit is kept in memory by each Worker instance, so it is approximate. For strict limits, use Cloudflare's Rate Limiting binding or a Durable Object.
+- With **View** ticked in the chat bar (it's on by default), each message also sends a small JPEG of what you're looking at. It's attached to your newest message only, and adds roughly 1,000 input tokens per message. Untick it to send text only.
 - The page sends your approximate position in the world (latitude/longitude rounded to about 100 m, heading, map scale) with each message, so Claude can talk about where you are. Remove `context` from the `fetch` in `Index.html` if you don't want that.
 
 ## Local testing

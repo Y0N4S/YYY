@@ -47,6 +47,8 @@
   #chatIn { flex:1; min-width:0; background:var(--panel); color:var(--ink); border:1px solid var(--edge); border-radius:8px; padding:8px 10px; font:inherit; -webkit-user-select:text; user-select:text; outline:none; }
   #chatIn:focus { border-color:rgba(255,255,255,.45); }
   #chatForm button { background:var(--panel); color:var(--ink); border:1px solid var(--edge); border-radius:8px; padding:0 12px; font:inherit; cursor:pointer; }
+  #snapLbl { display:flex; align-items:center; gap:4px; background:var(--panel); border:1px solid var(--edge); border-radius:8px; padding:0 8px; font-size:12px; cursor:pointer; white-space:nowrap; }
+  .msg .snap { display:block; width:120px; margin-top:6px; border-radius:4px; border:1px solid var(--edge); }
   #chatHint { font-size:11px; opacity:.7; text-align:right; }
   #chat:not(.open) #chatHint { display:none; }
   #bChat { right:calc(22px + env(safe-area-inset-right,0px)); bottom:calc(130px + env(safe-area-inset-bottom,0px)); width:58px; height:58px; }
@@ -60,7 +62,7 @@
 <div id="touch"><div id="stick"><div id="knob"></div></div><button id="bJump">Jump</button><button id="bCrouch">Crouch</button><button id="bChat">Talk</button></div>
 <div id="chat">
   <div id="chatLog" aria-live="polite"></div>
-  <form id="chatForm" autocomplete="off"><input id="chatIn" maxlength="2000" placeholder="Say something to Claude…" enterkeyhint="send"><button type="submit">Send</button></form>
+  <form id="chatForm" autocomplete="off"><input id="chatIn" maxlength="2000" placeholder="Say something to Claude…" enterkeyhint="send"><label id="snapLbl" title="Send a picture of what you're looking at with each message"><input id="chatSnap" type="checkbox" checked> View</label><button type="submit">Send</button></form>
   <div id="chatHint"><kbd>Enter</kbd> send &nbsp; <kbd>Esc</kbd> back to the game</div>
 </div>
 <div id="ratio">
@@ -261,11 +263,11 @@ addEventListener('keydown', e => {
   if (chatOpen || overlay.style.display !== 'none' || document.activeElement === rs) return;
   if (e.code === 'KeyT' || e.code === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); openChat(); }
 });
-chatIn.addEventListener('keydown', e => {
+chatForm.addEventListener('keydown', e => {
   e.stopPropagation();                                       // typing never moves the player
   if (e.code === 'Escape') { e.preventDefault(); closeChat(); }
 });
-chatIn.addEventListener('keyup', e => e.stopPropagation());
+chatForm.addEventListener('keyup', e => e.stopPropagation());
 if (isTouch) document.getElementById('bChat').addEventListener('click', () => chatOpen ? closeChat() : openChat());
 
 function addMsg(cls, text) {
@@ -277,6 +279,22 @@ function addMsg(cls, text) {
   chatLog.scrollTop = chatLog.scrollHeight;
   return d;
 }
+
+/* Snapshot of what you're looking at: re-render, then copy the WebGL canvas (the chat UI is HTML,
+   so it isn't in the picture). Downscaled JPEG keeps the upload small (~1k tokens per image).
+   Returns base64 JPEG data without the "data:" prefix, or null if it can't be captured. */
+const SNAP_MAX = 1024;
+function snapshotView() {
+  try {
+    renderer.render(scene, camera);                          // drawing buffer is only readable right after a render
+    const src = renderer.domElement, k = Math.min(1, SNAP_MAX / Math.max(src.width, src.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(src.width * k); c.height = Math.round(src.height * k);
+    c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.75).split(',')[1];
+  } catch (e) { console.warn('View snapshot failed', e); return null; }   // e.g. a map tile without CORS tainted the canvas
+}
+const chatSnap = document.getElementById('chatSnap');
 
 function chatContext() {                                     // where you are, in real-world terms
   const c = { scale: mapRatio, buildings: buildings.length,
@@ -297,13 +315,18 @@ chatForm.addEventListener('submit', async e => {
   if (!text || chatBusy) return;
   if (!CHAT_URL) { addMsg('err', 'Chat is not set up yet: put your Worker URL in CFG.chatUrl (see worker/README.md).'); return; }
   chatIn.value = ''; chatBusy = true;
-  addMsg('you', text);
+  const image = chatSnap.checked ? snapshotView() : null;   // only the newest message carries a picture
+  const you = addMsg('you', text);
+  if (image) {
+    const img = new Image(); img.src = 'data:image/jpeg;base64,' + image; img.alt = 'Your view';
+    img.className = 'snap'; you.append(img);
+  }
   chatHistory.push({ role: 'user', content: text });
   const bubble = addMsg('claude', '…'), out = bubble.lastChild;
   let reply = '';
   try {
     const res = await fetch(CHAT_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: chatHistory, context: chatContext() }) });
+      body: JSON.stringify({ messages: chatHistory, context: chatContext(), image }) });
     if (!res.ok) {
       let msg = 'HTTP ' + res.status; try { msg = (await res.json()).error || msg; } catch (_) {}
       throw new Error(msg);
@@ -437,7 +460,9 @@ setRatio(CFG.mapUnitsPerMetre);
    Each building becomes the smallest rotated rectangle around its footprint, extruded to its
    real height (height tag, else building:levels, else CFG.defaultBuildingHeight).
    Data stored in REAL metres; collision and rendering scale by 1 / mapRatio. */
-const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+const OVERPASS = ['https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter',
+                  'https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
+const OVERPASS_HEDGE_MS = 5000, OVERPASS_TIMEOUT_MS = 60000;
 const buildings = [];
 let buildingStatus = '';
 
@@ -472,19 +497,34 @@ function heightOf(t) {
   return CFG.defaultBuildingHeight;
 }
 
-async function overpass(query) {                 // tries each mirror in turn
-  let err;
-  for (const url of OVERPASS) {
-    try {
-      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 25000);
-      const res = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(query), signal: ctl.signal,
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
-      clearTimeout(t);
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      return (await res.json()).elements;
-    } catch (e) { err = e; }
-  }
-  throw err;
+/* Public Overpass servers vary from 1 s to 30+ s. Ask the first mirror; if it hasn't answered in
+   OVERPASS_HEDGE_MS (or fails), also ask the next one, and so on. The first good answer wins and
+   the other requests are cancelled. */
+function overpass(query) {
+  return new Promise((resolve, reject) => {
+    const ctls = [], errs = [];
+    let next = 0, pending = 0, done = false, hedge;
+    const finish = () => { done = true; clearInterval(hedge); ctls.forEach(c => c.abort()); };
+    const start = () => {
+      if (done || next >= OVERPASS.length) return;
+      const url = OVERPASS[next++], host = new URL(url).hostname, ctl = new AbortController();
+      ctls.push(ctl); pending++;
+      const t = setTimeout(() => ctl.abort(new Error(host + ' timed out')), OVERPASS_TIMEOUT_MS);
+      fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(query), signal: ctl.signal,
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
+        .then(res => { if (!res.ok) throw new Error(host + ' HTTP ' + res.status); return res.json(); })
+        .then(j => { clearTimeout(t); if (!done) { finish(); resolve(j.elements || []); } })
+        .catch(e => {
+          clearTimeout(t); pending--;
+          if (done) return;
+          errs.push(e.message || String(e));
+          if (next < OVERPASS.length) start();                                 // failed fast: try the next one now
+          else if (!pending) { finish(); reject(new Error('all map servers failed: ' + errs.join('; '))); }
+        });
+    };
+    start();
+    hedge = setInterval(start, OVERPASS_HEDGE_MS);
+  });
 }
 
 function renderBuildings(list) {                // list of [x, z, hx, hz, ang, h] in real metres
@@ -536,7 +576,11 @@ async function loadBuildings(lat, lon) {
     }
     try { localStorage.setItem(key, JSON.stringify(all.map(a => a.map(v => +v.toFixed(3))))); } catch (e) {}
     buildingStatus = ` · ${buildings.length} buildings`;
-  } catch (e) { buildingStatus = ' · buildings failed (' + e.message + ')'; }
+  } catch (e) {                                   // keep the rings that did load; don't cache a partial result
+    console.warn('Buildings:', e);
+    buildingStatus = buildings.length ? ` · ${buildings.length} buildings (outer area failed to load)`
+                                      : ' · buildings failed to load (map servers busy, reload to retry)';
+  }
 }
 
 // Circle (player) vs rotated box. Walk into the sides; land on and walk across the roof.

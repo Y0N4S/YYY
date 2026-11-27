@@ -12,12 +12,14 @@ const MAX_TOKENS = 2048;          // cost cap per reply on a public endpoint; ch
 const MAX_MESSAGES = 30;          // history kept per request
 const MAX_CHARS = 2000;           // per message
 const RATE = { windowMs: 60_000, max: 12 };   // per IP, best effort (per Worker instance)
+const MAX_IMAGE_B64 = 1_500_000;  // ~1.1 MB JPEG; the page sends ~100-200 KB
 
 const SYSTEM = `You are Claude, talking with a visitor inside a small first-person 3D world that runs in their web browser.
 The world is built from OpenStreetMap data around the visitor's real location: the ground is the street map and buildings are simple boxes extruded from OSM footprints.
 They can walk (WASD), sprint, jump, crouch, climb onto roofs, and change the map scale.
 Your replies appear in a small chat panel over the 3D view, so keep them short and conversational (usually 1-4 sentences), in plain text without Markdown.
-A context note with the visitor's current state in the world may follow; use it when it is relevant, and don't recite it otherwise.`;
+A context note with the visitor's current state in the world may follow; use it when it is relevant, and don't recite it otherwise.
+Their latest message may include a screenshot of exactly what they are looking at right now (first-person view; the white dot in the centre is the crosshair). Use it to answer questions like "what's that?" or "where should I go?". The ground texture is an OpenStreetMap street map, so you can often read street and place names from it. Buildings are untextured boxes, so don't guess at details they don't show.`;
 
 const hits = new Map();
 function rateLimited(ip) {
@@ -80,6 +82,18 @@ export default {
     try { body = await request.json(); } catch { return json(400, { error: "Bad JSON" }, headers); }
     const messages = cleanMessages(body.messages);
     if (!messages) return json(400, { error: "messages must be a non-empty list ending with a user message" }, headers);
+
+    // Optional snapshot of the visitor's view, attached to their newest message only.
+    const image = body.image;
+    if (image != null) {
+      if (typeof image !== "string" || image.length > MAX_IMAGE_B64 || !/^[A-Za-z0-9+/]+=*$/.test(image) || !image.startsWith("/9j/"))
+        return json(400, { error: "image must be base64 JPEG data under ~1 MB" }, headers);   // "/9j/" = JPEG magic bytes
+      const last = messages[messages.length - 1];
+      last.content = [
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: image } },
+        { type: "text", text: last.content },
+      ];
+    }
 
     const note = contextNote(body.context);
     const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
