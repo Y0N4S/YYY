@@ -63,7 +63,7 @@
 <div id="chat">
   <div id="chatLog" aria-live="polite"></div>
   <form id="chatForm" autocomplete="off"><input id="chatIn" maxlength="2000" placeholder="Say something to Claude…" enterkeyhint="send"><label id="snapLbl" title="Send a picture of what you're looking at with each message"><input id="chatSnap" type="checkbox" checked> View</label><button type="submit">Send</button></form>
-  <div id="chatHint"><kbd>Enter</kbd> send &nbsp; <kbd>Esc</kbd> or <kbd>Ctrl</kbd>+<kbd>T</kbd> back to the game</div>
+  <div id="chatHint"><kbd>Enter</kbd> send &nbsp; <kbd>Esc</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> back to the game</div>
 </div>
 <div id="ratio">
   <label for="rs">Map scale</label>
@@ -265,8 +265,8 @@ addEventListener('keydown', e => {
 });
 chatForm.addEventListener('keydown', e => {
   e.stopPropagation();                                       // typing never moves the player
-  if (e.code === 'Escape' || (e.code === 'KeyT' && (e.ctrlKey || e.metaKey))) { e.preventDefault(); closeChat(); }
-  // Note: most desktop browsers keep Ctrl+T for "new tab" and never pass it to the page,
+  if (e.code === 'Escape' || (e.code === 'KeyT' && (e.ctrlKey || e.metaKey) && e.shiftKey)) { e.preventDefault(); closeChat(); }
+  // Note: desktop browsers keep Ctrl+Shift+T for "reopen closed tab" and may never pass it to the page,
   // so Esc remains the reliable way out.
 });
 chatForm.addEventListener('keyup', e => e.stopPropagation());
