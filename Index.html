@@ -32,13 +32,37 @@
   body.touch #credit { bottom:calc(4px + env(safe-area-inset-bottom,0px)); left:50%; right:auto; transform:translateX(-50%); font-size:9px; max-width:40vw; }
   #credit { position:fixed; right:12px; bottom:calc(12px + env(safe-area-inset-bottom,0px)); font:11px system-ui, sans-serif; background:var(--panel); padding:5px 9px; border-radius:6px; pointer-events:none; text-align:right; }
   #hud { position:fixed; left:12px; bottom:calc(12px + env(safe-area-inset-bottom,0px)); font:12px ui-monospace, monospace; background:var(--panel); padding:6px 10px; border-radius:6px; pointer-events:none; }
+  /* Chat with Claude */
+  #chat { position:fixed; z-index:6; right:12px; bottom:calc(44px + env(safe-area-inset-bottom,0px)); width:min(380px, calc(100vw - 24px)); display:flex; flex-direction:column; gap:6px; font:14px/1.4 system-ui, sans-serif; pointer-events:none; }
+  #chatLog { max-height:40vh; overflow-y:auto; display:flex; flex-direction:column; gap:6px; transition:opacity .4s; }
+  #chatLog:empty { display:none; }
+  #chat:not(.open) #chatLog { opacity:.55; }
+  #chat.open #chatLog { pointer-events:auto; }
+  .msg { background:var(--panel); border:1px solid var(--edge); border-radius:8px; padding:6px 10px; white-space:pre-wrap; word-wrap:break-word; -webkit-user-select:text; user-select:text; }
+  .msg.you { align-self:flex-end; background:rgba(40,70,110,.85); }
+  .msg.claude b { color:#f0b48a; font-weight:600; }
+  .msg.err { color:#ffb4a8; }
+  #chatForm { display:none; gap:6px; pointer-events:auto; }
+  #chat.open #chatForm { display:flex; }
+  #chatIn { flex:1; min-width:0; background:var(--panel); color:var(--ink); border:1px solid var(--edge); border-radius:8px; padding:8px 10px; font:inherit; -webkit-user-select:text; user-select:text; outline:none; }
+  #chatIn:focus { border-color:rgba(255,255,255,.45); }
+  #chatForm button { background:var(--panel); color:var(--ink); border:1px solid var(--edge); border-radius:8px; padding:0 12px; font:inherit; cursor:pointer; }
+  #chatHint { font-size:11px; opacity:.7; text-align:right; }
+  #chat:not(.open) #chatHint { display:none; }
+  #bChat { right:calc(22px + env(safe-area-inset-right,0px)); bottom:calc(130px + env(safe-area-inset-bottom,0px)); width:58px; height:58px; }
+  body.touch #chat { bottom:calc(200px + env(safe-area-inset-bottom,0px)); }
 </style>
 </head>
 <body>
 <div id="cross"></div>
 <div id="hud"></div>
 <div id="credit"></div>
-<div id="touch"><div id="stick"><div id="knob"></div></div><button id="bJump">Jump</button><button id="bCrouch">Crouch</button></div>
+<div id="touch"><div id="stick"><div id="knob"></div></div><button id="bJump">Jump</button><button id="bCrouch">Crouch</button><button id="bChat">Talk</button></div>
+<div id="chat">
+  <div id="chatLog" aria-live="polite"></div>
+  <form id="chatForm" autocomplete="off"><input id="chatIn" maxlength="2000" placeholder="Say something to Claude…" enterkeyhint="send"><button type="submit">Send</button></form>
+  <div id="chatHint"><kbd>Enter</kbd> send &nbsp; <kbd>Esc</kbd> back to the game</div>
+</div>
 <div id="ratio">
   <label for="rs">Map scale</label>
   <input id="rs" type="range">
@@ -50,6 +74,7 @@
   <p>Click to capture the mouse.</p>
   <p><kbd>W A S D</kbd> move &nbsp; <kbd>Shift</kbd> sprint</p>
   <p><kbd>Space</kbd> jump &nbsp; <kbd>C</kbd> crouch &nbsp; <kbd>Esc</kbd> release</p>
+  <p><kbd>T</kbd> or <kbd>Enter</kbd> talk to Claude</p>
   <p>Map scale: use the slider (press Esc first) or <kbd>[</kbd> <kbd>]</kbd>.</p>
   <p>Allow location access to texture the ground with the map around you (1 km radius).</p>
 </div></div>
@@ -81,7 +106,9 @@ const CFG = {
   buildingRings: [250, 600],     // buildings load in rings (metres) so the nearest ones appear first
   texelTarget: 0.06,             // sharp ground: target world metres per map pixel near you (drives detail tile zoom)
   detailTiles: 3,                // detail tiles loaded this many tiles out from you (3 = 7x7 grid)
-  touchLook: 1.6                 // look speed multiplier on touch screens
+  touchLook: 1.6,                // look speed multiplier on touch screens
+  chatUrl: ''                    // CHAT: URL of your deployed Cloudflare Worker (see worker/README.md),
+                                 // e.g. 'https://yyy-claude-chat.<you>.workers.dev'. Or test with ?chat=<url>
 };
 
 /* ================= Scene ================= */
@@ -146,11 +173,11 @@ overlay.addEventListener('click', () => {
 });
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === renderer.domElement;
-  if (locked) dragLook = false; else if (!dragLook) overlay.style.display = 'flex';
+  if (locked) dragLook = false; else if (!dragLook && !chatOpen) overlay.style.display = 'flex';
 });
 addEventListener('mousemove', e => {
   if (locked) look(e.movementX, e.movementY);
-  else if (dragLook && e.buttons && !e.target.closest('#ratio')) look(e.movementX, e.movementY);
+  else if (dragLook && e.buttons && !chatOpen && !e.target.closest('#ratio, #chat')) look(e.movementX, e.movementY);
 });
 addEventListener('keydown', e => { if (e.code === 'Escape' && dragLook) { dragLook = false; overlay.style.display = 'flex'; } });
 
@@ -160,10 +187,10 @@ let touchJump = false, touchCrouch = false;
 if (isTouch) {
   document.body.classList.add('touch');
   document.getElementById('card').innerHTML = '<h1>First-person template</h1><p>Tap to start.</p>' +
-    '<p>Left thumb: move (push fully to sprint)<br>Right thumb: look<br>Buttons: jump and crouch</p>' +
+    '<p>Left thumb: move (push fully to sprint)<br>Right thumb: look<br>Buttons: jump, crouch, and Talk to chat with Claude</p>' +
     '<p>Allow location access to texture the ground with the map around you.</p>';
   const stick = document.getElementById('stick'), knob = document.getElementById('knob'), MAXD = 55;
-  const ignored = t => t.target.closest && t.target.closest('#ratio, button');
+  const ignored = t => t.target.closest && t.target.closest('#ratio, #chat, button');
   addEventListener('touchstart', e => {
     if (overlay.style.display !== 'none') return;             // first tap is handled by the overlay
     let used = false;
@@ -203,6 +230,101 @@ if (isTouch) {
   bJump.addEventListener('touchend', () => { touchJump = false; });
   bCrouch.addEventListener('touchstart', e => { e.preventDefault(); touchCrouch = !touchCrouch; bCrouch.classList.toggle('on', touchCrouch); }, { passive: false });
 }
+
+/* ================= Chat with Claude =================
+   Talks to a small proxy (worker/ folder, a Cloudflare Worker) that holds the API key.
+   T or Enter opens the chat, Esc returns to the game. Your rough position in the world is sent along
+   so Claude knows where you are. */
+const CHAT_URL = new URLSearchParams(location.search).get('chat') || CFG.chatUrl;
+const chatEl = document.getElementById('chat'), chatLog = document.getElementById('chatLog');
+const chatForm = document.getElementById('chatForm'), chatIn = document.getElementById('chatIn');
+const chatHistory = [];
+let chatOpen = false, chatBusy = false;
+
+function openChat() {
+  if (chatOpen) return;
+  chatOpen = true; chatEl.classList.add('open');
+  for (const k in keys) keys[k] = false;
+  joy.x = joy.y = 0; touchJump = false;
+  if (locked) document.exitPointerLock();
+  chatIn.focus();                                            // the opening key is preventDefault-ed, so no stray "t"
+}
+function closeChat() {
+  if (!chatOpen) return;
+  chatOpen = false; chatEl.classList.remove('open'); chatIn.blur();
+  if (!isTouch && !dragLook) {
+    try { renderer.domElement.requestPointerLock(); } catch (e) {}
+    setTimeout(() => { if (!locked && !dragLook && !chatOpen) overlay.style.display = 'flex'; }, 400);
+  }
+}
+addEventListener('keydown', e => {
+  if (chatOpen || overlay.style.display !== 'none' || document.activeElement === rs) return;
+  if (e.code === 'KeyT' || e.code === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); openChat(); }
+});
+chatIn.addEventListener('keydown', e => {
+  e.stopPropagation();                                       // typing never moves the player
+  if (e.code === 'Escape') { e.preventDefault(); closeChat(); }
+});
+chatIn.addEventListener('keyup', e => e.stopPropagation());
+if (isTouch) document.getElementById('bChat').addEventListener('click', () => chatOpen ? closeChat() : openChat());
+
+function addMsg(cls, text) {
+  const d = document.createElement('div'); d.className = 'msg ' + cls;
+  if (cls === 'claude') { const b = document.createElement('b'); b.textContent = 'Claude: '; d.append(b, document.createTextNode(text)); }
+  else d.textContent = text;
+  chatLog.append(d);
+  while (chatLog.children.length > 40) chatLog.firstChild.remove();
+  chatLog.scrollTop = chatLog.scrollHeight;
+  return d;
+}
+
+function chatContext() {                                     // where you are, in real-world terms
+  const c = { scale: mapRatio, buildings: buildings.length,
+    heading: ((-player.yaw * 180 / Math.PI) % 360 + 360) % 360,                  // 0 = north, clockwise
+    metresFromStart: Math.hypot(player.pos.x, player.pos.z) * mapRatio,
+    height: player.pos.y * mapRatio };
+  if (mapOrigin) {
+    const kx = 111320 * Math.cos(mapOrigin.lat * Math.PI / 180);
+    c.lat = mapOrigin.lat - player.pos.z * mapRatio / 111132;
+    c.lon = mapOrigin.lon + player.pos.x * mapRatio / kx;
+  }
+  return c;
+}
+
+chatForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  const text = chatIn.value.trim();
+  if (!text || chatBusy) return;
+  if (!CHAT_URL) { addMsg('err', 'Chat is not set up yet: put your Worker URL in CFG.chatUrl (see worker/README.md).'); return; }
+  chatIn.value = ''; chatBusy = true;
+  addMsg('you', text);
+  chatHistory.push({ role: 'user', content: text });
+  const bubble = addMsg('claude', '…'), out = bubble.lastChild;
+  let reply = '';
+  try {
+    const res = await fetch(CHAT_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: chatHistory, context: chatContext() }) });
+    if (!res.ok) {
+      let msg = 'HTTP ' + res.status; try { msg = (await res.json()).error || msg; } catch (_) {}
+      throw new Error(msg);
+    }
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      reply += dec.decode(value, { stream: true });
+      out.textContent = reply; chatLog.scrollTop = chatLog.scrollHeight;
+    }
+    reply += dec.decode();
+    if (!reply.trim()) throw new Error('empty reply');
+    if (/^\[[^\]]*\]$/.test(reply.trim())) throw new Error(reply.trim().slice(1, -1));   // proxy-side error line
+    out.textContent = reply;
+    chatHistory.push({ role: 'assistant', content: reply });
+  } catch (err) {
+    bubble.remove(); chatHistory.pop();                      // drop the unanswered message so history stays valid
+    addMsg('err', 'Could not reach Claude: ' + err.message);
+  } finally { chatBusy = false; }
+});
 
 /* ================= Movement + collision ================= */
 function overlaps(b) {
