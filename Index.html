@@ -18,6 +18,18 @@
   #ratio { position:fixed; z-index:5; top:calc(12px + env(safe-area-inset-top,0px)); left:12px; width:230px; background:var(--panel); border:1px solid var(--edge); border-radius:8px; padding:8px 12px; font:12px system-ui, sans-serif; }
   #ratio input { width:100%; margin:6px 0 2px; }
   #ratio .hint { opacity:.7; margin-top:4px; }
+  html, body { touch-action:none; -webkit-user-select:none; user-select:none; }
+  #touch { display:none; }
+  body.touch #touch { display:block; }
+  #stick { position:fixed; display:none; width:110px; height:110px; margin:-55px 0 0 -55px; border:2px solid var(--edge); border-radius:50%; background:rgba(255,255,255,.08); pointer-events:none; z-index:3; }
+  #knob { position:absolute; left:35px; top:35px; width:40px; height:40px; border-radius:50%; background:rgba(255,255,255,.5); }
+  #touch button { position:fixed; z-index:3; border:1px solid var(--edge); border-radius:50%; background:var(--panel); color:var(--ink); font:600 12px system-ui, sans-serif; touch-action:none; }
+  #touch button.on { background:rgba(255,255,255,.35); }
+  #bJump { right:calc(22px + env(safe-area-inset-right,0px)); bottom:calc(40px + env(safe-area-inset-bottom,0px)); width:78px; height:78px; }
+  #bCrouch { right:calc(112px + env(safe-area-inset-right,0px)); bottom:calc(40px + env(safe-area-inset-bottom,0px)); width:58px; height:58px; }
+  body.touch #ratio .hint { display:none; }
+  body.touch #hud { bottom:auto; top:calc(110px + env(safe-area-inset-top,0px)); }
+  body.touch #credit { bottom:calc(4px + env(safe-area-inset-bottom,0px)); left:50%; right:auto; transform:translateX(-50%); font-size:9px; max-width:40vw; }
   #credit { position:fixed; right:12px; bottom:calc(12px + env(safe-area-inset-bottom,0px)); font:11px system-ui, sans-serif; background:var(--panel); padding:5px 9px; border-radius:6px; pointer-events:none; text-align:right; }
   #hud { position:fixed; left:12px; bottom:calc(12px + env(safe-area-inset-bottom,0px)); font:12px ui-monospace, monospace; background:var(--panel); padding:6px 10px; border-radius:6px; pointer-events:none; }
 </style>
@@ -26,6 +38,7 @@
 <div id="cross"></div>
 <div id="hud"></div>
 <div id="credit"></div>
+<div id="touch"><div id="stick"><div id="knob"></div></div><button id="bJump">Jump</button><button id="bCrouch">Crouch</button></div>
 <div id="ratio">
   <label for="rs">Map scale</label>
   <input id="rs" type="range">
@@ -43,6 +56,10 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
+/* Device: phones/tablets get touch controls. Override for testing with ?touch=1 or ?touch=0 */
+const touchParam = new URLSearchParams(location.search).get('touch');
+const isTouch = touchParam ? touchParam === '1' : matchMedia('(hover: none) and (pointer: coarse)').matches;
+
 /* ================= CONFIG: tweak these ================= */
 const CFG = {
   walkSpeed: 5, sprintSpeed: 8.5, crouchSpeed: 2.5,
@@ -60,12 +77,16 @@ const CFG = {
                        // higher = smaller, sharper world (walkable radius = mapRadius / this)
   ratioMin: 0.1, ratioMax: 100,  // slider range
   defaultBuildingHeight: 9,      // metres, when OSM has no height or levels tag
-  levelHeight: 3.2               // metres per building:levels
+  levelHeight: 3.2,              // metres per building:levels
+  buildingRings: [250, 600],     // buildings load in rings (metres) so the nearest ones appear first
+  texelTarget: 0.06,             // sharp ground: target world metres per map pixel near you (drives detail tile zoom)
+  detailTiles: 3,                // detail tiles loaded this many tiles out from you (3 = 7x7 grid)
+  touchLook: 1.6                 // look speed multiplier on touch screens
 };
 
 /* ================= Scene ================= */
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, isTouch ? 1.5 : 2));
 document.body.prepend(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x9fb7c9);
@@ -96,7 +117,7 @@ addBox(-8, 0, -14, 3, 2.5, 3, 0xd97a5a);   // staircase of jumps
 
 /* ================= Player state ================= */
 const player = {
-  pos: new THREE.Vector3(0, 0, 6),   // feet position
+  pos: new THREE.Vector3(0, 0, 0),   // feet position (0,0 = your real location)
   vel: new THREE.Vector3(),
   yaw: 0, pitch: 0,
   height: CFG.standHeight,
@@ -118,8 +139,10 @@ function look(dx, dy) {
 overlay.addEventListener('click', () => {
   overlay.style.display = 'none';
   startLocation();
-  try { renderer.domElement.requestPointerLock(); } catch (e) {}
-  setTimeout(() => { if (!locked) dragLook = true; }, 300); // fallback if pointer lock is blocked
+  if (!isTouch) {
+    try { renderer.domElement.requestPointerLock(); } catch (e) {}
+    setTimeout(() => { if (!locked) dragLook = true; }, 300); // fallback if pointer lock is blocked
+  }
 });
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === renderer.domElement;
@@ -130,6 +153,56 @@ addEventListener('mousemove', e => {
   else if (dragLook && e.buttons && !e.target.closest('#ratio')) look(e.movementX, e.movementY);
 });
 addEventListener('keydown', e => { if (e.code === 'Escape' && dragLook) { dragLook = false; overlay.style.display = 'flex'; } });
+
+/* ---- Touch controls: left thumb = floating joystick (push fully to sprint), right thumb = look ---- */
+const joy = { id: null, ox: 0, oy: 0, x: 0, y: 0 }, lk = { id: null, x: 0, y: 0 };
+let touchJump = false, touchCrouch = false;
+if (isTouch) {
+  document.body.classList.add('touch');
+  document.getElementById('card').innerHTML = '<h1>First-person template</h1><p>Tap to start.</p>' +
+    '<p>Left thumb: move (push fully to sprint)<br>Right thumb: look<br>Buttons: jump and crouch</p>' +
+    '<p>Allow location access to texture the ground with the map around you.</p>';
+  const stick = document.getElementById('stick'), knob = document.getElementById('knob'), MAXD = 55;
+  const ignored = t => t.target.closest && t.target.closest('#ratio, button');
+  addEventListener('touchstart', e => {
+    if (overlay.style.display !== 'none') return;             // first tap is handled by the overlay
+    let used = false;
+    for (const t of e.changedTouches) {
+      if (ignored(t)) continue;
+      used = true;
+      if (t.clientX < innerWidth * 0.45 && joy.id === null) {
+        Object.assign(joy, { id: t.identifier, ox: t.clientX, oy: t.clientY, x: 0, y: 0 });
+        stick.style.cssText = `display:block;left:${t.clientX}px;top:${t.clientY}px`;
+        knob.style.transform = 'translate(0,0)';
+      } else if (lk.id === null) Object.assign(lk, { id: t.identifier, x: t.clientX, y: t.clientY });
+    }
+    if (used) e.preventDefault();
+  }, { passive: false });
+  addEventListener('touchmove', e => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === joy.id) {
+        let dx = t.clientX - joy.ox, dy = t.clientY - joy.oy; const l = Math.hypot(dx, dy);
+        if (l > MAXD) { dx *= MAXD / l; dy *= MAXD / l; }
+        joy.x = dx / MAXD; joy.y = dy / MAXD;
+        knob.style.transform = `translate(${dx}px,${dy}px)`;
+      } else if (t.identifier === lk.id) {
+        look((t.clientX - lk.x) * CFG.touchLook, (t.clientY - lk.y) * CFG.touchLook);
+        lk.x = t.clientX; lk.y = t.clientY;
+      }
+    }
+  }, { passive: true });
+  const end = e => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === joy.id) { joy.id = null; joy.x = joy.y = 0; stick.style.display = 'none'; }
+      if (t.identifier === lk.id) lk.id = null;
+    }
+  };
+  addEventListener('touchend', end); addEventListener('touchcancel', end);
+  const bJump = document.getElementById('bJump'), bCrouch = document.getElementById('bCrouch');
+  bJump.addEventListener('touchstart', e => { e.preventDefault(); touchJump = true; }, { passive: false });
+  bJump.addEventListener('touchend', () => { touchJump = false; });
+  bCrouch.addEventListener('touchstart', e => { e.preventDefault(); touchCrouch = !touchCrouch; bCrouch.classList.toggle('on', touchCrouch); }, { passive: false });
+}
 
 /* ================= Movement + collision ================= */
 function overlaps(b) {
@@ -157,7 +230,7 @@ function moveAxis(axis, amount) {
 
 function updatePlayer(dt) {
   // crouch (blocked from standing up under a ceiling)
-  const wantCrouch = keys.KeyC || keys.ControlLeft;
+  const wantCrouch = keys.KeyC || keys.ControlLeft || touchCrouch;
   const targetH = wantCrouch ? CFG.crouchHeight : CFG.standHeight;
   if (targetH > player.height) {
     const prev = player.height; player.height = targetH;
@@ -166,13 +239,14 @@ function updatePlayer(dt) {
   const crouching = player.height < CFG.standHeight - 0.01;
 
   // wish direction relative to where we're looking
-  const fwd = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
-  const strafe = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
+  const clamp1 = v => Math.max(-1, Math.min(1, v));
+  const fwd = clamp1((keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0) - joy.y);
+  const strafe = clamp1((keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + joy.x);
   const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
   let wx = strafe * cos - fwd * sin, wz = -strafe * sin - fwd * cos;
-  const len = Math.hypot(wx, wz); if (len > 0) { wx /= len; wz /= len; }
+  const len = Math.hypot(wx, wz); if (len > 1) { wx /= len; wz /= len; }   // analog input keeps partial speed
 
-  const sprinting = keys.ShiftLeft && fwd > 0 && !crouching;
+  const sprinting = (keys.ShiftLeft || Math.hypot(joy.x, joy.y) > 0.92) && fwd > 0 && !crouching;
   const speed = crouching ? CFG.crouchSpeed : sprinting ? CFG.sprintSpeed : CFG.walkSpeed;
   const accel = CFG.groundAccel * (player.grounded ? 1 : CFG.airControl) * dt;
   const approach = (v, t) => v + Math.max(-accel, Math.min(accel, t - v));
@@ -180,7 +254,7 @@ function updatePlayer(dt) {
   player.vel.z = approach(player.vel.z, wz * speed);
 
   // jump + gravity
-  if (keys.Space && player.grounded) player.vel.y = CFG.jumpSpeed;
+  if ((keys.Space || touchJump) && player.grounded) player.vel.y = CFG.jumpSpeed;
   player.vel.y -= CFG.gravity * dt;
 
   // integrate with collision
@@ -220,7 +294,9 @@ let mapRatio = CFG.mapUnitsPerMetre;
 const rs = document.getElementById('rs'), rv = document.getElementById('rv');
 rs.min = Math.log10(CFG.ratioMin); rs.max = Math.log10(CFG.ratioMax); rs.step = 0.01;   // log slider
 function setRatio(r) {
+  const old = mapRatio;
   mapRatio = Math.min(CFG.ratioMax, Math.max(CFG.ratioMin, r));
+  if (old !== mapRatio) player.pos.multiplyScalar(old / mapRatio);   // same real-world spot (incl. height on a roof)
   rs.value = Math.log10(mapRatio);
   mapGroup.scale.set(1 / mapRatio, 1, 1 / mapRatio);           // keep height at 1 to avoid z-fighting
   bGroup.scale.setScalar(1 / mapRatio);
@@ -239,7 +315,7 @@ setRatio(CFG.mapUnitsPerMetre);
    Each building becomes the smallest rotated rectangle around its footprint, extruded to its
    real height (height tag, else building:levels, else CFG.defaultBuildingHeight).
    Data stored in REAL metres; collision and rendering scale by 1 / mapRatio. */
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
 const buildings = [];
 let buildingStatus = '';
 
@@ -274,40 +350,70 @@ function heightOf(t) {
   return CFG.defaultBuildingHeight;
 }
 
+async function overpass(query) {                 // tries each mirror in turn
+  let err;
+  for (const url of OVERPASS) {
+    try {
+      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 25000);
+      const res = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(query), signal: ctl.signal,
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+      clearTimeout(t);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return (await res.json()).elements;
+    } catch (e) { err = e; }
+  }
+  throw err;
+}
+
+function renderBuildings(list) {                // list of [x, z, hx, hz, ang, h] in real metres
+  if (!list.length) return;
+  const geo = new THREE.BoxGeometry(1, 1, 1); geo.translate(0, 0.5, 0);   // unit cube sitting on y = 0
+  const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), list.length);
+  mesh.frustumCulled = false;
+  const d = new THREE.Object3D(), col = new THREE.Color();
+  list.forEach(([x, z, hx, hz, ang, h], i) => {
+    d.position.set(x, 0, z); d.rotation.set(0, -ang, 0); d.scale.set(hx * 2, h, hz * 2);
+    d.updateMatrix(); mesh.setMatrixAt(i, d.matrix);
+    col.setHSL(0.09, 0.12, 0.74 - Math.min(h, 60) / 60 * 0.3 + ((i * 37) % 11) / 200);  // taller = darker
+    mesh.setColorAt(i, col);
+    buildings.push({ x, z, hx, hz, h, ang, c: Math.cos(ang), s: Math.sin(ang), r: Math.hypot(hx, hz) });
+  });
+  bGroup.add(mesh);
+  testMeshes.forEach(m => scene.remove(m)); testMeshes.length = 0; solids.length = 0;   // drop the demo blocks
+}
+
+/* Loads buildings in rings (nearest first). Results are cached in localStorage per ~100 m cell,
+   so the next visit is instant. Coordinates are stored relative to the snapped cell centre. */
 async function loadBuildings(lat, lon) {
   buildingStatus = ' · loading buildings…';
+  const sLat = Math.round(lat * 1000) / 1000, sLon = Math.round(lon * 1000) / 1000;
+  const kx = 111320 * Math.cos(sLat * Math.PI / 180), kz = 111132;
+  const ox = (sLon - lon) * kx, oz = -(sLat - lat) * kz;           // cell centre relative to you
+  const R = CFG.mapRadius + 100, key = `bld1:${sLat}:${sLon}:${R}`;
+  const shift = l => l.map(a => [a[0] + ox, a[1] + oz, a[2], a[3], a[4], a[5]])
+                      .filter(a => Math.hypot(a[0], a[1]) <= CFG.mapRadius);
   try {
-    const q = `[out:json][timeout:30];way["building"](around:${CFG.mapRadius},${lat},${lon});out tags geom;`;
-    const res = await fetch(OVERPASS_URL, { method: 'POST', body: 'data=' + encodeURIComponent(q),
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    const kx = 111320 * Math.cos(lat * Math.PI / 180), kz = 111132;   // metres per degree
-    const list = [];
-    for (const w of data.elements) {
-      if (!w.geometry || w.geometry.length < 4) continue;
-      const r = minRect(w.geometry.map(g => [(g.lon - lon) * kx, -(g.lat - lat) * kz]));  // -z = north
-      if (!r || Math.hypot(r.x, r.z) > CFG.mapRadius) continue;
-      r.hx = Math.max(r.hx, 0.75); r.hz = Math.max(r.hz, 0.75);
-      r.h = heightOf(w.tags || {}); r.r = Math.hypot(r.hx, r.hz);
-      list.push(r);
+    const hit = JSON.parse(localStorage.getItem(key) || 'null');
+    if (hit) { renderBuildings(shift(hit)); buildingStatus = ` · ${buildings.length} buildings (cached)`; return; }
+  } catch (e) {}
+  const edges = [0, ...CFG.buildingRings.filter(r => r < R), R], all = [];
+  try {
+    for (let i = 1; i < edges.length; i++) {
+      const [r0, r1] = [edges[i - 1], edges[i]];
+      const around = r => `way["building"](around:${r},${sLat},${sLon})`;
+      const q = `[out:json][timeout:25];${r0 ? `(${around(r1)};-${around(r0)};)` : around(r1)};out tags geom;`;
+      const part = [];
+      for (const w of await overpass(q)) {
+        if (!w.geometry || w.geometry.length < 4) continue;
+        const r = minRect(w.geometry.map(g => [(g.lon - sLon) * kx, -(g.lat - sLat) * kz]));   // -z = north
+        if (r) part.push([r.x, r.z, Math.max(r.hx, 0.75), Math.max(r.hz, 0.75), r.ang, heightOf(w.tags || {})]);
+      }
+      all.push(...part);
+      renderBuildings(shift(part));
+      buildingStatus = ` · ${buildings.length} buildings (loading…)`;
     }
-    if (!list.length) { buildingStatus = ' · no buildings found'; return; }
-
-    const geo = new THREE.BoxGeometry(1, 1, 1); geo.translate(0, 0.5, 0);   // unit cube sitting on y = 0
-    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), list.length);
-    mesh.frustumCulled = false;
-    const d = new THREE.Object3D(), col = new THREE.Color();
-    list.forEach((b, i) => {
-      d.position.set(b.x, 0, b.z); d.rotation.set(0, -b.ang, 0); d.scale.set(b.hx * 2, b.h, b.hz * 2);
-      d.updateMatrix(); mesh.setMatrixAt(i, d.matrix);
-      col.setHSL(0.09, 0.12, 0.74 - Math.min(b.h, 60) / 60 * 0.3 + ((i * 37) % 11) / 200);  // taller = darker
-      mesh.setColorAt(i, col);
-    });
-    bGroup.add(mesh);
-    buildings.push(...list);
-    testMeshes.forEach(m => scene.remove(m)); testMeshes.length = 0; solids.length = 0;   // drop the demo blocks
-    buildingStatus = ` · ${list.length} buildings`;
+    try { localStorage.setItem(key, JSON.stringify(all.map(a => a.map(v => +v.toFixed(3))))); } catch (e) {}
+    buildingStatus = ` · ${buildings.length} buildings`;
   } catch (e) { buildingStatus = ' · buildings failed (' + e.message + ')'; }
 }
 
@@ -322,7 +428,7 @@ function collideBuildings(axis, amount) {
     const ex = lx - Math.max(-hx, Math.min(hx, lx)), ez = lz - Math.max(-hz, Math.min(hz, lz));
     const d2 = ex * ex + ez * ez;
     if (d2 >= rad * rad) continue;
-    if (axis === 'y') { if (amount <= 0) { p.y = top; player.vel.y = 0; player.grounded = true; } continue; }
+    if (axis === 'y') { if (amount <= 0 && p.y - amount >= top - 0.05) { p.y = top; player.vel.y = 0; player.grounded = true; } continue; }
     let px, pz;                                                           // push-out in box space
     if (d2 > 1e-9) { const dd = Math.sqrt(d2); px = ex / dd * (rad - dd); pz = ez / dd * (rad - dd); }
     else if (hx - Math.abs(lx) < hz - Math.abs(lz)) { px = Math.sign(lx || 1) * (hx - Math.abs(lx) + rad); pz = 0; }
@@ -331,6 +437,56 @@ function collideBuildings(axis, amount) {
     p.x += wx; p.z += wz;
     const vn = (player.vel.x * wx + player.vel.z * wz) / m;               // cancel velocity into the wall
     if (vn < 0) { player.vel.x -= wx / m * vn; player.vel.z -= wz / m * vn; }
+  }
+}
+
+/* ================= Detail tiles =================
+   The base mosaic is one texture for the whole map (soft up close). Around the player we also stream
+   higher-zoom OSM tiles, with the zoom picked from the map scale so map pixels stay ~CFG.texelTarget
+   world metres. Tiles live in mapGroup (real metres), so the slider scales them with everything else. */
+const detail = new Map();                       // "z/x/y" -> { z, x, y, state, mesh }
+let mapOrigin = null, baseZoom = 99, detailT = 0;
+const maxAniso = renderer.capabilities.getMaxAnisotropy();
+
+function disposeTile(e) {
+  if (!e.mesh) return;
+  mapGroup.remove(e.mesh); e.mesh.material.map.dispose(); e.mesh.material.dispose(); e.mesh.geometry.dispose();
+}
+function addDetailTile(key, z, x, y, cx, cy, ts) {
+  const e = { z, x, y, state: 'loading', mesh: null }; detail.set(key, e);
+  const n = 2 ** z;
+  loadImage(TILE_URL.replace('{z}', z).replace('{x}', ((x % n) + n) % n).replace('{y}', y)).then(img => {
+    if (detail.get(key) !== e) return;                          // removed while loading
+    if (!img) { e.state = 'failed'; return; }
+    const tex = new THREE.Texture(img); tex.needsUpdate = true; tex.anisotropy = maxAniso;
+    e.mesh = new THREE.Mesh(new THREE.PlaneGeometry(ts, ts), new THREE.MeshBasicMaterial({
+      map: tex, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    e.mesh.rotation.x = -Math.PI / 2;
+    e.mesh.position.set((x + 0.5 - cx) * ts, 0.03, (y + 0.5 - cy) * ts);
+    mapGroup.add(e.mesh); e.state = 'ready';
+  });
+}
+function updateDetail() {
+  if (!mapOrigin) return;
+  const { lat, lon } = mapOrigin, rad = lat * Math.PI / 180;
+  const zd = Math.min(19, Math.ceil(Math.log2(156543.03392 * Math.cos(rad) / (CFG.texelTarget * mapRatio))));
+  const want = new Set();
+  let px = 0, py = 0, rt = 0;
+  if (zd > baseZoom) {                                          // otherwise the base mosaic is sharp enough
+    const n = 2 ** zd, ts = 256 * 156543.03392 * Math.cos(rad) / n;    // tile size in real metres
+    const cx = (lon + 180) / 360 * n, cy = (1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * n;
+    px = cx + player.pos.x * mapRatio / ts; py = cy + player.pos.z * mapRatio / ts;   // you, in tile coords
+    rt = Math.min(CFG.detailRadius * mapRatio / ts, CFG.detailTiles);
+    for (let ty = Math.max(0, Math.floor(py - rt)); ty <= Math.min(n - 1, Math.floor(py + rt)); ty++)
+      for (let tx = Math.floor(px - rt); tx <= Math.floor(px + rt); tx++) {
+        const key = `${zd}/${tx}/${ty}`; want.add(key);
+        if (!detail.has(key)) addDetailTile(key, zd, tx, ty, cx, cy, ts);
+      }
+  }
+  const ready = [...want].every(k => detail.get(k).state !== 'loading');
+  for (const [k, e] of detail) {
+    const far = Math.abs(e.x + 0.5 - px) > rt + 1.5 || Math.abs(e.y + 0.5 - py) > rt + 1.5;
+    if (e.z === zd ? far : ready) { disposeTile(e); detail.delete(k); }   // old zoom goes once the new one is in
   }
 }
 
@@ -357,6 +513,7 @@ const loadImage = url => new Promise(res => {
 
 async function loadMap(lat, lon) {
   loadBuildings(lat, lon);                                       // runs in parallel with the tiles
+  mapOrigin = { lat, lon };
   const rad = lat * Math.PI / 180, maxTex = Math.min(renderer.capabilities.maxTextureSize, 8192);
   let z = CFG.mapZoom, n, mpp, cx, cy, x0, x1, y0, y1, cols, rows;
   for (;; z--) {                                                 // lower the zoom until the mosaic fits in one texture
@@ -370,6 +527,7 @@ async function loadMap(lat, lon) {
     cols = x1 - x0 + 1; rows = y1 - y0 + 1;
     if (Math.max(cols, rows) * 256 <= maxTex || z <= 12) break;
   }
+  baseZoom = z;
   credit.textContent = `Loading ${cols * rows} map tiles…`;
 
   const canvas = document.createElement('canvas');
@@ -404,6 +562,7 @@ let last = performance.now();
 (function frame(now) {
   requestAnimationFrame(frame);
   let dt = Math.min((now - last) / 1000, 0.1); last = now;
+  if (now - detailT > 350) { detailT = now; updateDetail(); }
   const steps = Math.ceil(dt / 0.016);          // substeps keep collisions stable on slow frames
   for (let i = 0; i < steps; i++) updatePlayer(dt / steps);
   renderer.render(scene, camera);
