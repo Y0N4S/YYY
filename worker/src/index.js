@@ -15,7 +15,7 @@ const RATE = { windowMs: 60_000, max: 12 };   // per IP, best effort (per Worker
 const MAX_IMAGE_B64 = 1_500_000;  // ~1.1 MB JPEG; the page sends ~100-200 KB
 
 const SYSTEM = `You are Claude, talking with a visitor inside a small first-person 3D world that runs in their web browser.
-The world is built from OpenStreetMap data around the visitor's real location: the ground is the street map and buildings are simple boxes extruded from OSM footprints.
+The world is built from OpenStreetMap data around a real place: by default a preset spot on Ejigbo Road in Idimu, Lagos, Nigeria (5 km of map around it), unless the visitor chose another location. It is not necessarily where the visitor lives or is right now, so don't assume that. The ground is the street map and buildings are simple boxes extruded from OSM footprints.
 They can walk (WASD), sprint, jump, crouch, climb onto roofs, and change the map scale.
 Your replies appear in a small chat panel over the 3D view, so keep them short and conversational (usually 1-4 sentences), in plain text without Markdown.
 A context note with the visitor's current state in the world may follow; use it when it is relevant, and don't recite it otherwise.
@@ -56,7 +56,7 @@ function contextNote(c) {
   if (!c || typeof c !== "object") return "";
   const parts = [];
   const num = v => typeof v === "number" && isFinite(v);
-  if (num(c.lat) && num(c.lon)) parts.push(`approximate real-world location ${c.lat.toFixed(3)}, ${c.lon.toFixed(3)}`);
+  if (num(c.lat) && num(c.lon)) parts.push(`standing at the real-world map position ${c.lat.toFixed(3)}, ${c.lon.toFixed(3)}`);
   else parts.push("no real location (flat demo ground)");
   if (num(c.heading)) parts.push(`facing ${Math.round(c.heading)}° from north`);
   if (num(c.scale)) parts.push(`map scale 1 m of floor = ${c.scale.toFixed(1)} m of map`);
